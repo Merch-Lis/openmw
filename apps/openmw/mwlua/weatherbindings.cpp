@@ -276,6 +276,17 @@ namespace MWLua
         api["getCurrentWindSpeed"] = overloadWeatherGetter(&MWBase::World::getWindSpeed);
         api["getCurrentStormDirection"] = overloadWeatherGetter(&MWBase::World::getStormDirection);
 
+        // XE Sky Variations port: daily atmospheric-scattering
+        // override for the MGE fog shader. Colors are util.color values
+        // (0..1 per channel). clearMgeScattering() reverts to the shader's
+        // built-in preset constants.
+        api["setMgeScattering"] = [](const Misc::Color& outScatter, const Misc::Color& inScatter) {
+            MWBase::Environment::get().getWorld()->setMgeScattering(outScatter.toVec(), inScatter.toVec(), true);
+        };
+        api["clearMgeScattering"] = []() {
+            MWBase::Environment::get().getWorld()->setMgeScattering(osg::Vec4f(), osg::Vec4f(), false);
+        };
+
         return LuaUtil::makeReadOnly(api);
     }
 }

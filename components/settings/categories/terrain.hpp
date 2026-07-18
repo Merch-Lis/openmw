@@ -37,7 +37,37 @@ namespace Settings
             makeMaxStrictSanitizerFloat(0) };
         SettingValue<float> mObjectPagingMinSizeCostMultiplier{ mIndex, "Terrain",
             "object paging min size cost multiplier", makeMaxStrictSanitizerFloat(0) };
+        SettingValue<float> mObjectPagingLandmarkSize{ mIndex, "Terrain", "object paging landmark size",
+            makeMaxSanitizerFloat(0) };
+        SettingValue<float> mObjectPagingLandmarkRangeFactor{ mIndex, "Terrain",
+            "object paging landmark range factor", makeMaxSanitizerFloat(1) };
+        SettingValue<float> mObjectPagingSimplifyStrength{ mIndex, "Terrain", "object paging simplify strength",
+            makeMaxSanitizerFloat(0) };
+        SettingValue<float> mObjectPagingPopDistanceFloor{ mIndex, "Terrain", "object paging pop distance floor",
+            makeMaxSanitizerFloat(0) };
+        SettingValue<bool> mObjectPagingCacheCompression{ mIndex, "Terrain", "object paging cache compression" };
+        SettingValue<int> mObjectPagingReadThreads{ mIndex, "Terrain", "object paging read threads",
+            makeClampSanitizerInt(1, 16) };
+        SettingValue<std::string> mObjectPagingDiskCacheDir{ mIndex, "Terrain", "object paging disk cache dir" };
         SettingValue<bool> mWaterCulling{ mIndex, "Terrain", "water culling" };
+
+        // mge-exact distant statics: three size classes, MGEXEgui model
+        SettingValue<float> mDistantStaticsMinNear{ mIndex, "Terrain", "distant statics min size near",
+            makeMaxSanitizerFloat(0) };
+        SettingValue<float> mDistantStaticsEndNear{ mIndex, "Terrain", "distant statics end near",
+            makeMaxSanitizerFloat(0) };
+        SettingValue<float> mDistantStaticsMinFar{ mIndex, "Terrain", "distant statics min size far",
+            makeMaxSanitizerFloat(0) };
+        SettingValue<float> mDistantStaticsEndFar{ mIndex, "Terrain", "distant statics end far",
+            makeMaxSanitizerFloat(0) };
+        SettingValue<float> mDistantStaticsMinVeryFar{ mIndex, "Terrain", "distant statics min size very far",
+            makeMaxSanitizerFloat(0) };
+        SettingValue<float> mDistantStaticsEndVeryFar{ mIndex, "Terrain", "distant statics end very far",
+            makeMaxSanitizerFloat(0) };
+        SettingValue<int> mDistantStaticsNearRingCells{ mIndex, "Terrain", "distant statics near ring cells" };
+        SettingValue<int> mDistantStaticsFarRingCells{ mIndex, "Terrain", "distant statics far ring cells" };
+        SettingValue<int> mDistantStaticsVeryFarRingCells{ mIndex, "Terrain",
+            "distant statics very far ring cells" };
     };
 }
 

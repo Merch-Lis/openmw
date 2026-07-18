@@ -169,6 +169,8 @@ namespace OMW
         std::filesystem::path mStartupScript;
         int mActivationDistanceOverride;
         std::filesystem::path mSaveGameFile;
+        bool mGenerateDistantLand = false;
+        bool mGenerateDistantLandDone = false;
         // Grab mouse?
         bool mGrab;
 
@@ -193,6 +195,7 @@ namespace OMW
         void executeLocalScripts();
 
         bool frame(unsigned frameNumber, float dt);
+        void generateDistantLand();
 
         /// Prepare engine for game play
         void prepareEngine();
@@ -261,6 +264,9 @@ namespace OMW
 
         /// Set the save game file to load after initialising the engine.
         void setSaveGameFile(const std::filesystem::path& savegame);
+
+        /// v7: generate the distant-land chunk cache for the whole exterior, then quit
+        void setGenerateDistantLand(bool generate);
 
         void setRandomSeed(unsigned int seed);
 

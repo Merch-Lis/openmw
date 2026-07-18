@@ -141,13 +141,32 @@ vec4 lcalcSpecular(int lightIndex)
 #endif
 }
 
+// Per-subgraph clamp override: actor faces/armor carry their contrast baked
+// into the texture and clip badly at light peaks. The engine raises this
+// uniform on actor roots when [Shaders] 'clamp lighting actors' is enabled;
+// everything else keeps the global @clamp behaviour (MGE tonemap curve).
+uniform float uClampLightingActor;       // raised on actor subgraphs (identity)
+uniform float uClampLightingActorsGate;  // the live [Shaders] 'clamp lighting actors' switch
+
 void clampLightingResult(inout vec3 lighting)
 {
 #if @clamp
     lighting = clamp(lighting, vec3(0.0), vec3(1.0));
 #else
-    lighting = max(lighting, 0.0);
+    if (uClampLightingActor > 0.5 && uClampLightingActorsGate > 0.5)
+        lighting = clamp(lighting, vec3(0.0), vec3(1.0));
+    else
+        lighting = max(lighting, 0.0);
 #endif
 }
+
+// MGE XE-style per-object tonemap: polynomial maps [0, 2.2] -> [0, 1].
+// Midtones nearly untouched (0.5 -> 0.506), highlights gracefully compressed.
+vec3 perObjectTonemap(vec3 c)
+{
+    c = clamp(c, 0.0, 2.2);
+    return (((0.0548303 * c - 0.189786) * c - 0.154732) * c + 1.12969) * c;
+}
+
 
 #endif

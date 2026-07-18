@@ -74,6 +74,10 @@ namespace OpenMW
         addOption("new-game", bpo::value<bool>()->implicit_value(true)->default_value(false),
             "run new game sequence (ignored if skip-menu=0)");
 
+        addOption("generate-distant-land", bpo::value<bool>()->implicit_value(true)->default_value(false),
+            "generate the distant-land chunk cache for the entire exterior world, then exit (requires [Terrain] "
+            "'object paging disk cache dir'; combine with --skip-menu --new-game)");
+
         addOption("encoding", bpo::value<std::string>()->default_value("win1252"),
             "Character encoding used in OpenMW game messages:\n"
             "\n\twin1250 - Central and Eastern European such as Polish, Czech, Slovak, Hungarian, Slovene, Bosnian, "

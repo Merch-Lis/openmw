@@ -1812,6 +1812,11 @@ namespace MWWorld
         return mWeatherManager->getTransitionFactor();
     }
 
+    void World::setMgeScattering(const osg::Vec4f& outScatter, const osg::Vec4f& inScatter, bool enable)
+    {
+        mRendering->setMgeScattering(outScatter, inScatter, enable);
+    }
+
     unsigned int World::getNightDayMode() const
     {
         return mWeatherManager->getNightDayMode();
@@ -2202,6 +2207,31 @@ namespace MWWorld
         camera->setPitch(camera->getPitch() + rot[0]);
         camera->setYaw(camera->getYaw() + rot[2]);
         return true;
+    }
+
+    void World::refreshDistantStatics()
+    {
+        // Snapshot the save's world state for every content-file ref in a
+        // loaded exterior cell of the default worldspace. Unchanged refs
+        // contribute bit-identical hash input (same position floats, enabled),
+        // so only genuinely disabled/moved refs make a supercell stale.
+        MWRender::ObjectPaging::RefStateMap refStates;
+        mWorldModel.forEachLoadedCellStore([&refStates](CellStore& cellStore) {
+            const MWWorld::Cell* cell = cellStore.getCell();
+            if (!cell->isExterior() || cell->getWorldSpace() != ESM::Cell::sDefaultWorldspaceId)
+                return;
+            cellStore.forEachConst([&refStates](const MWWorld::ConstPtr& ptr) {
+                const ESM::RefNum refNum = ptr.getCellRef().getRefNum();
+                if (!refNum.hasContentFile())
+                    return true; // dynamically placed - never part of the bake
+                MWRender::ObjectPaging::RefStateOverride& state = refStates[refNum];
+                state.mEnabled = ptr.getRefData().isEnabled() && !ptr.getBase()->isDeleted();
+                state.mMoved = true;
+                state.mPosition = ptr.getRefData().getPosition().asVec3();
+                return true;
+            });
+        });
+        mRendering->refreshDistantStatics(refStates);
     }
 
     void World::saveLoaded(const ESM::ESMReader& reader)

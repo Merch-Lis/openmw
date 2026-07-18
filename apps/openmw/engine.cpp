@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <chrono>
 #include <future>
+#include <set>
 #include <system_error>
 
 #include <osgDB/ReaderWriter>
@@ -57,6 +58,12 @@
 #include "mwinput/inputmanagerimp.hpp"
 
 #include "mwgui/windowmanagerimp.hpp"
+#include "mwrender/objectpaging.hpp"
+#include "mwrender/renderingmanager.hpp"
+#include "mwworld/cellstore.hpp"
+#include "mwworld/esmstore.hpp"
+#include "mwworld/scene.hpp"
+#include <components/esm3/loadcell.hpp>
 
 #include "mwlua/luamanagerimp.hpp"
 #include "mwlua/worker.hpp"
@@ -234,6 +241,15 @@ bool OMW::Engine::frame(unsigned frameNumber, float frametime)
         {
             ScopedProfile<UserStatsType::State> profile(frameStart, frameNumber, *timer, *stats);
             mStateManager->update(frametime);
+        }
+
+        // v7: distant-land generation mode (--generate-distant-land)
+        if (mGenerateDistantLand && !mGenerateDistantLandDone
+            && mStateManager->getState() == MWBase::StateManager::State_Running)
+        {
+            mGenerateDistantLandDone = true;
+            generateDistantLand();
+            mStateManager->requestQuit();
         }
 
         bool paused = mWorld->getTimeManager()->isPaused();
@@ -1124,6 +1140,96 @@ void OMW::Engine::enableFontExport(bool exportFonts)
 void OMW::Engine::setSaveGameFile(const std::filesystem::path& savegame)
 {
     mSaveGameFile = savegame;
+}
+
+void OMW::Engine::setGenerateDistantLand(bool generate)
+{
+    mGenerateDistantLand = generate;
+    MWRender::ObjectPaging::setGenerationMode(generate);
+}
+
+// v7 distant-land pregeneration: sweep a lattice of viewpoints across the
+// exterior world driving the REAL terrain-preload pipeline, so every chunk
+// is built and disk-cached with exactly the id/LOD/content a live session
+// would request. Interruptible and resumable: already-written chunks are
+// served from disk on the next run instead of being rebuilt.
+void OMW::Engine::generateDistantLand()
+{
+    const MWWorld::Store<ESM::Cell>& cells = mWorld->getStore().get<ESM::Cell>();
+    int minX = std::numeric_limits<int>::max(), minY = std::numeric_limits<int>::max();
+    int maxX = std::numeric_limits<int>::min(), maxY = std::numeric_limits<int>::min();
+    std::set<std::pair<int, int>> definedCells;
+    for (auto it = cells.extBegin(); it != cells.extEnd(); ++it)
+    {
+        minX = std::min(minX, it->getGridX());
+        maxX = std::max(maxX, it->getGridX());
+        minY = std::min(minY, it->getGridY());
+        maxY = std::max(maxY, it->getGridY());
+        definedCells.emplace(it->getGridX(), it->getGridY());
+    }
+    if (minX > maxX)
+    {
+        Log(Debug::Error) << "Distant land generation: no exterior cells found";
+        return;
+    }
+
+    const float cellSize = Constants::CellSizeInUnits;
+    constexpr int spacing = 4; // lattice spacing in cells
+
+    // enter the exterior worldspace so the terrain system targets it
+    ESM::Position pos;
+    std::memset(&pos, 0, sizeof(pos));
+    pos.pos[0] = (minX + 0.5f) * cellSize;
+    pos.pos[1] = (minY + 0.5f) * cellSize;
+    pos.pos[2] = 8192.f;
+    mWorld->changeToCell(ESM::RefId::esm3ExteriorCell(minX, minY), pos, false, false);
+
+    const int nx = (maxX - minX) / spacing + 1;
+    const int ny = (maxY - minY) / spacing + 1;
+    const int total = nx * ny;
+    Log(Debug::Info) << "Distant land generation: cells [" << minX << "," << minY << "]..[" << maxX << ","
+                     << maxY << "], " << total << " lattice points";
+
+    MWRender::RenderingManager* rendering = mWorld->getRenderingManager();
+    int done = 0;
+    for (int y = minY; y <= maxY; y += spacing)
+    {
+        for (int x = minX; x <= maxX; x += spacing)
+        {
+            // Skip lattice points in open ocean: no defined cell within
+            // ~view range means nothing meaningful generates from here (the
+            // coarse chunks covering distant land generate from lattice
+            // points near that land).
+            constexpr int oceanMargin = 8;
+            bool nearLand = false;
+            for (int cy = y - oceanMargin; cy <= y + oceanMargin && !nearLand; ++cy)
+                for (int cx = x - oceanMargin; cx <= x + oceanMargin && !nearLand; ++cx)
+                    if (definedCells.count({ cx, cy }))
+                        nearLand = true;
+            ++done;
+            if (!nearLand)
+                continue;
+
+            const osg::Vec3f point((x + 0.5f) * cellSize, (y + 0.5f) * cellSize, 8192.f);
+            try
+            {
+                const std::string label = "Generating distant land: " + std::to_string(done) + "/"
+                    + std::to_string(total) + " (safe to close - generation resumes on the next run)";
+                mWorld->getWorldScene().preloadTerrain(point, ESM::Cell::sDefaultWorldspaceId, true, label);
+            }
+            catch (const std::exception& e)
+            {
+                Log(Debug::Warning) << "Distant land generation: preload failed at " << x << "," << y << ": "
+                                    << e.what();
+            }
+            rendering->drainObjectPagingWriteQueue();
+            rendering->clearObjectPagingCache();
+            Log(Debug::Info) << "Distant land generation: " << done << "/" << total;
+            if ((done % 16) == 0)
+                mResourceSystem->clearCache();
+        }
+    }
+    Log(Debug::Info) << "Distant land generation complete: " << done << "/" << total << " lattice points";
 }
 
 void OMW::Engine::setRandomSeed(unsigned int seed)

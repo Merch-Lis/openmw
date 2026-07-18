@@ -326,6 +326,8 @@ namespace MWWorld
 
         float getWeatherTransition() const override;
 
+        void setMgeScattering(const osg::Vec4f& outScatter, const osg::Vec4f& inScatter, bool enable) override;
+
         unsigned int getNightDayMode() const override;
 
         int getMasserPhase() const override;
@@ -464,6 +466,8 @@ namespace MWWorld
         void disableDeferredPreviewRotation() override;
 
         void saveLoaded(const ESM::ESMReader& reader) override;
+
+        void refreshDistantStatics() override;
 
         void setupPlayer() override;
         void renderPlayer() override;

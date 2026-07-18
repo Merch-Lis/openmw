@@ -70,6 +70,9 @@ void main()
 #endif
 
     float shadowing = unshadowedLightRatio(linearDepth);
+    // MGE parity: cloud cover fades shadows (XE Mod Shadow.fx
+    // x *= 0.25 + 0.75*sunVis; sunVis = light 0 specular alpha)
+    shadowing = 1.0 - (1.0 - shadowing) * (0.25 + 0.75 * clamp(lcalcSpecular(0).a, 0.0, 1.0));
 
     vec3 lighting;
 #if !PER_PIXEL_LIGHTING
@@ -83,6 +86,9 @@ void main()
     clampLightingResult(lighting);
 
     gl_FragData[0].xyz *= lighting;
+
+    gl_FragData[0].xyz = perObjectTonemap(gl_FragData[0].xyz);
+
     gl_FragData[0] = applyFogAtDist(gl_FragData[0], euclideanDepth, linearDepth, far);
 
 #if !@disableNormals

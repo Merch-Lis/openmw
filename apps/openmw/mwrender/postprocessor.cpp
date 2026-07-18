@@ -450,8 +450,15 @@ namespace MWRender
             }
             Stereo::setMultiviewCompatibleTextureSize(texture, width, height);
             texture->setSourceFormat(GL_RGBA);
-            texture->setSourceType(GL_UNSIGNED_BYTE);
-            texture->setInternalFormat(GL_RGBA);
+            // HDR chains run the ping-pong buffers in FP16: 8-bit
+            // intermediates posterize smooth low-amplitude gradients at
+            // every pass boundary, and tone-mapping passes then amplify
+            // the steps into visible banding. 'hdr chain' opts weaker GPUs
+            // back into 8-bit buffers.
+            const bool fp16 = mHDR && Settings::postProcessing().mHdrChain;
+            texture->setSourceType(fp16 ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE);
+            texture->setInternalFormat(fp16 ? GL_RGBA16F_ARB : GL_RGBA);
+            texture->dirtyTextureObject();
             texture->setFilter(osg::Texture2D::MIN_FILTER, osg::Texture::LINEAR);
             texture->setFilter(osg::Texture2D::MAG_FILTER, osg::Texture::LINEAR);
             texture->setWrap(osg::Texture::WRAP_S, osg::Texture::CLAMP_TO_EDGE);

@@ -8,7 +8,9 @@
 #include <osg/Group>
 #include <osg/Light>
 #include <osg/Material>
+#include <osg/PolygonOffset>
 #include <osg/Matrix>
+#include <osg/PolygonMode>
 #include <osg/UserDataContainer>
 
 #include <osgUtil/LineSegmentIntersector>
@@ -34,6 +36,7 @@
 #include <components/sceneutil/cullsafeboundsvisitor.hpp>
 #include <components/sceneutil/depth.hpp>
 #include <components/sceneutil/lightmanager.hpp>
+#include <components/sceneutil/occlusionculling.hpp>
 #include <components/sceneutil/positionattitudetransform.hpp>
 #include <components/sceneutil/shadow.hpp>
 #include <components/sceneutil/stateupdater.hpp>
@@ -45,6 +48,7 @@
 
 #include <components/terrain/quadtreeworld.hpp>
 #include <components/terrain/terraingrid.hpp>
+#include <components/terrain/terrainoccluder.hpp>
 
 #include <components/esm3/loadcell.hpp>
 #include <components/esm4/loadcell.hpp>
@@ -74,6 +78,7 @@
 #include "navmesh.hpp"
 #include "npcanimation.hpp"
 #include "objectpaging.hpp"
+#include "occlusionculling.hpp"
 #include "pathgrid.hpp"
 #include "postprocessor.hpp"
 #include "recastmesh.hpp"
@@ -253,6 +258,44 @@ namespace MWRender
         mGroundcover = chunkMgr.mGroundcover.get();
         mObjectPaging = chunkMgr.mObjectPaging.get();
 
+        if (Settings::camera().mOcclusionCulling)
+        {
+            const int bufW = Settings::camera().mOcclusionBufferWidth;
+            const int bufH = Settings::camera().mOcclusionBufferHeight;
+            mOcclusionCuller = new SceneUtil::OcclusionCuller(bufW, bufH);
+            mOcclusionCuller->setTestMargin(Settings::camera().mOcclusionTestMargin);
+
+            const float cellWorldSize = Constants::CellSizeInUnits;
+            mTerrainOccluder = std::make_unique<Terrain::TerrainOccluder>(mTerrainStorage.get(), cellWorldSize);
+            mTerrainOccluder->setWorldspace(ESM::Cell::sDefaultWorldspaceId);
+            mTerrainOccluder->setLodLevel(Settings::camera().mOcclusionTerrainLod);
+
+            const int radius = Settings::camera().mOcclusionTerrainRadius;
+            const bool enableTerrain = Settings::camera().mOcclusionCullingTerrain;
+            const bool debugOverlay = Settings::camera().mOcclusionDebugOverlay;
+            const bool debugMessages = Settings::camera().mOcclusionDebugMessages;
+            const bool enableInteriors = Settings::camera().mOcclusionCullingInteriors;
+            const unsigned int maxTriangles = static_cast<unsigned int>(Settings::camera().mOcclusionMaxTriangles);
+            mSceneOcclusionCallback = new SceneOcclusionCallback(
+                mOcclusionCuller, mTerrainOccluder.get(), radius, enableTerrain, debugOverlay, debugMessages,
+                enableInteriors);
+            sceneRoot->addCullCallback(mSceneOcclusionCallback);
+
+            const float occluderMinRadius = Settings::camera().mOcclusionOccluderMinRadius;
+            const float occluderMaxRadius = Settings::camera().mOcclusionOccluderMaxRadius;
+            const float occluderShrinkFactor = Settings::camera().mOcclusionOccluderShrinkFactor;
+            const int occluderMeshRes = Settings::camera().mOcclusionOccluderMeshResolution;
+            const int occluderMaxMeshRes = Settings::camera().mOcclusionOccluderMaxMeshResolution;
+            const float occluderInsideThreshold = Settings::camera().mOcclusionOccluderInsideThreshold;
+            const float occluderMaxDistance = Settings::camera().mOcclusionOccluderMaxDistance;
+            const bool enableStatics = Settings::camera().mOcclusionCullingStatics;
+            mObjects->setOcclusionCuller(mOcclusionCuller, occluderMinRadius, occluderMaxRadius, occluderShrinkFactor,
+                occluderMeshRes, occluderMaxMeshRes, occluderInsideThreshold, occluderMaxDistance, enableStatics,
+                maxTriangles);
+            if (mObjectPaging)
+                mObjectPaging->setOcclusionCuller(mOcclusionCuller, maxTriangles);
+        }
+
         mStateUpdater = new SceneUtil::StateUpdater();
         sceneRoot->addUpdateCallback(mStateUpdater);
 
@@ -270,6 +313,41 @@ namespace MWRender
             mPostProcessor->getTexture(PostProcessor::Tex_OpaqueDepth, 1));
         resourceSystem->getSceneManager()->setSupportsNormalsRT(mPostProcessor->getSupportsNormalsRT());
         resourceSystem->getSceneManager()->setWeatherParticleOcclusion(Settings::shaders().mWeatherParticleOcclusion);
+
+        // NOTE: must stay after PostProcessor construction - the loader
+        // threads compile object shaders, which need the postprocessor's
+        // global defines (distorionRTRatio) and reserved texture units.
+        // mge-exact: session-resident distant statics. Loaded ONCE here, held
+        // for the process lifetime; save loads never touch them. The root is
+        // MSOC-exempt (no occlusion callbacks) and toggles with the sky for
+        // interiors. While active, paged distant chunks are suppressed.
+        if (mObjectPaging)
+        {
+            const std::filesystem::path dsDir
+                = std::filesystem::path(Settings::terrain().mObjectPagingDiskCacheDir.get()) / "distant-statics";
+            std::error_code dsEc;
+            if (std::filesystem::is_directory(dsDir, dsEc))
+            {
+                mDistantStaticsRoot = new osg::Group;
+                mDistantStaticsRoot->setName("Distant Statics (resident)");
+                mDistantStaticsRoot->setNodeMask(Mask_Static);
+                // the resident layer overlaps stock rendering out to the
+                // viewing distance; identical surfaces at identical depths
+                // z-fight, and the copies shade differently (no per-light
+                // state on the backdrop) - flicker around light sources.
+                // Bias the whole layer back so it always loses depth ties.
+                mDistantStaticsRoot->getOrCreateStateSet()->setAttributeAndModes(
+                    new osg::PolygonOffset(1.f, 4.f), osg::StateAttribute::ON);
+                if (mObjectPaging->loadDistantStaticsResident(dsDir, mDistantStaticsRoot.get()) > 0)
+                {
+                    sceneRoot->addChild(mDistantStaticsRoot);
+                    mDistantStaticsDir = dsDir;
+                }
+                else
+                    mDistantStaticsRoot = nullptr;
+            }
+        }
+
 
         // water goes after terrain for correct waterculling order
         mWater = std::make_unique<Water>(
@@ -307,6 +385,55 @@ namespace MWRender
         resourceSystem->getSceneManager()->setUpNormalsRTForStateSet(sceneRoot->getOrCreateStateSet(), true);
 
         mFog = std::make_unique<FogManager>();
+
+        // MGE XE parity uniforms for the ported MGE shaders. Attached to the
+        // root node so sky, water and scene shaders all see them.
+        // mgeWeatherUniforms = 1 tells the shaders a patched engine provides
+        // live values (stock builds leave these at the GLSL default of 0).
+        mMgeNiceWeatherUniform = new osg::Uniform("mgeNiceWeather", 0.f);
+        mMgeSkyColorUniform = new osg::Uniform("mgeSkyColor", osg::Vec3f(0.5f, 0.5f, 0.5f));
+        // (weather Fog Ratio ff, weather Fog Offset fo, isExterior, isDay)
+        mMgeFogParamsUniform = new osg::Uniform("mgeFogParams", osg::Vec4f(1.f, 0.f, 1.f, 1.f));
+        // Weather-transition endpoints. Shaders derive fog ranges at BOTH
+        // endpoint weathers and lerp the derived values, so nonlinear terms
+        // don't compress the visual change into a fraction of the
+        // transition. Cur = (ff, fo, valid, 0); Next = (ff, fo, blend, 0).
+        mMgeFogParamsCurUniform = new osg::Uniform("mgeFogParamsCur", osg::Vec4f(-1.f, 0.f, 0.f, 0.f));
+        mMgeFogParamsNextUniform = new osg::Uniform("mgeFogParamsNext", osg::Vec4f(-1.f, 0.f, 0.f, 0.f));
+        // World-space sun direction, valid in EVERY render pass. The MGE
+        // scatter previously derived the sun from the per-pass light list,
+        // which is degenerate in the water-reflection RTT's sky rendering
+        // (normalize(0) -> NaN -> black reflected sky).
+        mMgeSunDirUniform = new osg::Uniform("mgeSunDir", osg::Vec3f(0.f, 0.f, 0.f));
+        // XE Sky Variations: daily scattering override fed from
+        // Lua (core.weather.setMgeScattering); off = shader preset consts.
+        mMgeOutscatterUniform = new osg::Uniform("mgeOutscatterU", osg::Vec3f(0.f, 0.f, 0.f));
+        mMgeInscatterUniform = new osg::Uniform("mgeInscatterU", osg::Vec3f(0.f, 0.f, 0.f));
+        mMgeScatterOnUniform = new osg::Uniform("mgeScatterUniformsOn", 0.f);
+        mRootNode->getOrCreateStateSet()->addUniform(mMgeNiceWeatherUniform);
+        mRootNode->getOrCreateStateSet()->addUniform(mMgeSkyColorUniform);
+        mRootNode->getOrCreateStateSet()->addUniform(mMgeFogParamsUniform);
+        mRootNode->getOrCreateStateSet()->addUniform(mMgeFogParamsCurUniform);
+        mRootNode->getOrCreateStateSet()->addUniform(mMgeFogParamsNextUniform);
+        mRootNode->getOrCreateStateSet()->addUniform(mMgeSunDirUniform);
+        mRootNode->getOrCreateStateSet()->addUniform(mMgeOutscatterUniform);
+        mRootNode->getOrCreateStateSet()->addUniform(mMgeInscatterUniform);
+        mRootNode->getOrCreateStateSet()->addUniform(mMgeScatterOnUniform);
+        mRootNode->getOrCreateStateSet()->addUniform(new osg::Uniform("mgeWeatherUniforms", 1.f));
+        // live gate for [Shaders] 'clamp lighting actors' (actor roots carry
+        // the identity uniform; this one carries the on/off switch)
+        mClampActorsGateUniform
+            = new osg::Uniform("uClampLightingActorsGate", Settings::shaders().mClampLightingActors ? 1.f : 0.f);
+        mRootNode->getOrCreateStateSet()->addUniform(mClampActorsGateUniform);
+        // explicit 0 default for the actor-identity uniform: actors and world
+        // objects share shader programs, and GL retains a program's last-set
+        // uniform value - without a root-level default, world geometry drawn
+        // after an actor inherited the actor's 1 (visible terrain leak)
+        mRootNode->getOrCreateStateSet()->addUniform(new osg::Uniform("uClampLightingActor", 0.f));
+        // MGE fog envelope from settings; the Distant Land Generator app is
+        // the intended editor (game closed), so ctor-time read suffices
+        mRootNode->getOrCreateStateSet()->addUniform(new osg::Uniform(
+            "mgeFogRange", osg::Vec2f(Settings::fog().mMgeFogStartCells, Settings::fog().mMgeFogEndCells)));
 
         mSky = std::make_unique<SkyManager>(
             sceneRoot, mRootNode, mViewer->getCamera(), resourceSystem->getSceneManager(), mSkyBlending);
@@ -370,6 +497,20 @@ namespace MWRender
     {
         // let background loading thread finish before we delete anything else
         mWorkQueue = nullptr;
+
+        // INTENTIONAL LEAK: the resident distant-statics world
+        // is ~15 GB of small OSG allocations; destructing it frees millions
+        // of heap blocks and stalled quit for minutes - the "freeze on exit"
+        // reports. Symbolized freeze dumps show the main thread GRINDING in
+        // RtlpFreeHeap/RtlpCoalesceFreeBlocks/RtlpInsertFreeBlock under
+        // Engine::~Engine -> scene-graph destructors: not deadlocked, just
+        // O(millions) of frees. The process is exiting; the OS reclaims the
+        // whole heap instantly. One extra ref keeps the subtree destructor
+        // from ever running. ObjectPaging's worker threads still join
+        // cleanly in its own destructor - only memory destruction is
+        // skipped, no state is lost (saves never depend on the bake).
+        if (mDistantStaticsRoot)
+            mDistantStaticsRoot->ref();
     }
 
     osgUtil::IncrementalCompileOperation* RenderingManager::getIncrementalCompileOperation()
@@ -510,6 +651,28 @@ namespace MWRender
         mPostProcessor->getStateUpdater()->setSunVis(sunVis);
     }
 
+    void RenderingManager::setMgeWeather(float niceWeather, const osg::Vec4f& skyColor, float dlFogFactor,
+        float dlFogOffset, bool isExterior, float dlFogFactorCur, float dlFogOffsetCur, float dlFogFactorNext,
+        float dlFogOffsetNext, float dlFogBlend)
+    {
+        mMgeNiceWeatherUniform->set(niceWeather);
+        mMgeSkyColorUniform->set(osg::Vec3f(skyColor.x(), skyColor.y(), skyColor.z()));
+        // isDay from mNight (set by WeatherManager just before this call).
+        // MGE equivalent: updateSun flips sunPos.z downward when sunVis==0 so
+        // the scattering sees a below-horizon sun at night.
+        mMgeFogParamsUniform->set(
+            osg::Vec4f(dlFogFactor, dlFogOffset, isExterior ? 1.f : 0.f, mNight ? 0.f : 1.f));
+        mMgeFogParamsCurUniform->set(osg::Vec4f(dlFogFactorCur, dlFogOffsetCur, dlFogFactorCur >= 0.f ? 1.f : 0.f, 0.f));
+        mMgeFogParamsNextUniform->set(osg::Vec4f(dlFogFactorNext, dlFogOffsetNext, dlFogBlend, 0.f));
+    }
+
+    void RenderingManager::setMgeScattering(const osg::Vec4f& outScatter, const osg::Vec4f& inScatter, bool enable)
+    {
+        mMgeOutscatterUniform->set(osg::Vec3f(outScatter.x(), outScatter.y(), outScatter.z()));
+        mMgeInscatterUniform->set(osg::Vec3f(inScatter.x(), inScatter.y(), inScatter.z()));
+        mMgeScatterOnUniform->set(enable ? 1.f : 0.f);
+    }
+
     void RenderingManager::setSunDirection(const osg::Vec3f& direction)
     {
         osg::Vec3f position = -direction;
@@ -521,6 +684,13 @@ namespace MWRender
         const osg::Vec3f sunlightPos = Settings::shaders().mMatchSunlightToSun ? position : -direction;
         // need to wrap this in a StateUpdater?
         mSunLight->setPosition(osg::Vec4f(sunlightPos, 0.f));
+
+        // MGE parity: world-space sun direction for the scatter shaders,
+        // identical to the light-0 direction the main pass sees, but valid
+        // in every render pass (the RTT sky rendering has no usable light 0)
+        osg::Vec3f mgeSun = sunlightPos;
+        mgeSun.normalize();
+        mMgeSunDirUniform->set(mgeSun);
 
         mSky->setSunDirection(position);
 
@@ -538,6 +708,13 @@ namespace MWRender
         {
             enableTerrain(true, store->getCell()->getWorldSpace());
             mTerrain->loadCell(store->getCell()->getGridX(), store->getCell()->getGridY());
+        }
+
+        if (mSceneOcclusionCallback)
+        {
+            const bool isInterior = !store->getCell()->isExterior() && !store->getCell()->isQuasiExterior();
+            const bool isQuasiExterior = store->getCell()->isQuasiExterior();
+            mSceneOcclusionCallback->setCellType(isInterior, isQuasiExterior);
         }
     }
     void RenderingManager::removeCell(const MWWorld::CellStore* store)
@@ -573,9 +750,17 @@ namespace MWRender
         mTerrain->enable(enable);
     }
 
+    void RenderingManager::refreshDistantStatics(const ObjectPaging::RefStateMap& refStates)
+    {
+        if (mObjectPaging && mDistantStaticsRoot)
+            mObjectPaging->refreshResidentSupercells(refStates, mDistantStaticsDir, mDistantStaticsRoot.get());
+    }
+
     void RenderingManager::setSkyEnabled(bool enabled)
     {
         mSky->setEnabled(enabled);
+        if (mDistantStaticsRoot)
+            mDistantStaticsRoot->setNodeMask(enabled ? Mask_Static : 0);
         if (enabled)
             mShadowManager->enableOutdoorMode();
         else
@@ -650,6 +835,8 @@ namespace MWRender
 
     void RenderingManager::update(float dt, bool paused)
     {
+        if (mObjectPaging && mDistantStaticsRoot)
+            mObjectPaging->updateResidentRings(osg::Vec3f(mCamera->getPosition()));
         reportStats();
 
         mResourceSystem->getSceneManager()->getShaderManager().update(*mViewer);
@@ -1075,6 +1262,8 @@ namespace MWRender
 
     void RenderingManager::renderPlayer(const MWWorld::Ptr& player)
     {
+        player.getRefData().getBaseNode()->getOrCreateStateSet()->addUniform(
+            new osg::Uniform("uClampLightingActor", 1.f));
         mPlayerAnimation = new NpcAnimation(player, player.getRefData().getBaseNode(), mResourceSystem, 0,
             NpcAnimation::VM_Normal, mFirstPersonFieldOfView);
 
@@ -1310,6 +1499,10 @@ namespace MWRender
                 if (MWMechanics::getPlayer().isInCell())
                     configureAmbient(*MWMechanics::getPlayer().getCell()->getCell());
             }
+            else if (it->first == "Shaders" && it->second == "clamp lighting actors")
+            {
+                mClampActorsGateUniform->set(Settings::shaders().mClampLightingActors ? 1.f : 0.f);
+            }
             else if (it->first == "Shaders"
                 && (it->second == "force per pixel lighting" || it->second == "classic falloff"
                     || it->second == "clamp lighting"))
@@ -1362,6 +1555,37 @@ namespace MWRender
                     if (auto* hud = MWBase::Environment::get().getWindowManager()->getPostProcessorHud())
                         hud->setVisible(false);
                 }
+            }
+            else if (it->first == "Shadows")
+            {
+                mViewer->stopThreading();
+
+                mShadowManager->setupShadowSettings(
+                    Settings::shadows(), mResourceSystem->getSceneManager()->getShaderManager());
+
+                // Recompute casting masks from current settings
+                int shadowCastingTraversalMask = Mask_Scene;
+                if (Settings::shadows().mActorShadows)
+                    shadowCastingTraversalMask |= Mask_Actor;
+                if (Settings::shadows().mPlayerShadows)
+                    shadowCastingTraversalMask |= Mask_Player;
+
+                int indoorShadowCastingTraversalMask = shadowCastingTraversalMask;
+                if (Settings::shadows().mObjectShadows)
+                    shadowCastingTraversalMask |= (Mask_Object | Mask_Static);
+                if (Settings::shadows().mTerrainShadows)
+                    shadowCastingTraversalMask |= Mask_Terrain;
+
+                mShadowManager->updateCastingMasks(shadowCastingTraversalMask, indoorShadowCastingTraversalMask);
+
+                // Update global shader defines (soft shadows, resolution, cascade count)
+                auto defines = mResourceSystem->getSceneManager()->getShaderManager().getGlobalDefines();
+                auto shadowDefines = mShadowManager->getShadowDefines(Settings::shadows());
+                for (const auto& [name, value] : shadowDefines)
+                    defines[name] = value;
+                mResourceSystem->getSceneManager()->getShaderManager().setGlobalDefines(defines);
+
+                mViewer->startThreading();
             }
         }
 
@@ -1592,6 +1816,18 @@ namespace MWRender
     {
         if (mObjectPaging)
             mObjectPaging->getPagedRefnums(activeGrid, out);
+    }
+
+    void RenderingManager::drainObjectPagingWriteQueue()
+    {
+        if (mObjectPaging)
+            mObjectPaging->drainWriteQueue();
+    }
+
+    void RenderingManager::clearObjectPagingCache()
+    {
+        if (mObjectPaging)
+            mObjectPaging->clearCache();
     }
 
     void RenderingManager::setNavMeshMode(Settings::NavMeshRenderMode value)

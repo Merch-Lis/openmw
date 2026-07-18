@@ -653,6 +653,9 @@ void MWState::StateManager::loadGame(const Character* character, const std::file
         MWBase::Environment::get().getWorldScene()->markCellAsUnchanged();
 
         MWBase::Environment::get().getLuaManager()->gameLoaded();
+        // mge-exact tier-2 reactivity: bring the resident distant statics in
+        // line with this save (Ghostfence, strongholds, quest-moved statics)
+        MWBase::Environment::get().getWorld()->refreshDistantStatics();
         for (int actorId : actorIdConverter.mGraveyard)
         {
             auto mapped = actorIdConverter.mMappings.find(actorId);

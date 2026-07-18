@@ -726,6 +726,10 @@ if (BUILD_NAVMESHTOOL)
     add_subdirectory(apps/navmeshtool)
 endif()
 
+if (BUILD_OPENMW)
+    add_subdirectory(apps/distantlandtool)
+endif()
+
 if (BUILD_BULLETOBJECTTOOL)
     add_subdirectory(apps/bulletobjecttool)
 endif()

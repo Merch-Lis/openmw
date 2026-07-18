@@ -819,6 +819,9 @@ namespace MWWorld
             mWindSpeed = 0.f;
             mCurrentWindSpeed = 0.f;
             mNextWindSpeed = 0.f;
+            // MGE XE parity: interiors run linear palette fog (niceWeather=0,
+            // isExterior=0), matching MGE's adjustFog interior branch.
+            mRendering.setMgeWeather(0.f, mResult.mSkyColor, 1.f, 0.f, false);
             return;
         }
 
@@ -902,6 +905,38 @@ namespace MWWorld
         mRendering.setSunColour(mResult.mSunColor, mResult.mSunColor, mResult.mGlareView * glareFade);
 
         mRendering.getSkyManager()->setWeather(mResult);
+
+        // MGE XE parity: feed weather identity + sky colour to the shaders
+        // (consumed by the MGE fog/scattering shaders in resources/shaders).
+        {
+            const auto niceOf = [](int w) { return (w == 0 || w == 1) ? 1.f : 0.f; };
+            float niceWeather = niceOf(mCurrentWeather);
+            if (mNextWeather >= 0)
+            {
+                // mTransitionFactor counts DOWN from 1 to 0 as the transition
+                // progresses; the engine's own blend uses (1 - factor) — see
+                // calculateWeatherResult. Raw factor here snapped the scatter
+                // to the next weather the instant a transition began.
+                niceWeather = lerp(niceWeather, niceOf(mNextWeather), 1.f - mTransitionFactor);
+            }
+            // MGE squares the blended value (distantland.cpp adjustFog:
+            // niceWeather *= niceWeather)
+            niceWeather *= niceWeather;
+            // Endpoint fog params + blend: shaders lerp DERIVED fog ranges
+            // between the endpoint weathers, so knee-shaped terms don't
+            // compress the visible change into a fraction of the transition.
+            float ffCur = mWeatherSettings[mCurrentWeather].mDL.FogFactor;
+            float foCur = mWeatherSettings[mCurrentWeather].mDL.FogOffset / 100.0f;
+            float ffNext = ffCur, foNext = foCur, fogBlend = 0.f;
+            if (mNextWeather >= 0)
+            {
+                ffNext = mWeatherSettings[mNextWeather].mDL.FogFactor;
+                foNext = mWeatherSettings[mNextWeather].mDL.FogOffset / 100.0f;
+                fogBlend = 1.f - mTransitionFactor;
+            }
+            mRendering.setMgeWeather(niceWeather, mResult.mSkyColor, mResult.mDLFogFactor,
+                mResult.mDLFogOffset / 100.0f, true, ffCur, foCur, ffNext, foNext, fogBlend);
+        }
 
         // Play sounds
         if (mPlayingAmbientSoundID != mResult.mAmbientLoopSoundID)

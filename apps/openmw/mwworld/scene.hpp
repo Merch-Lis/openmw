@@ -131,7 +131,6 @@ namespace MWWorld
             const osg::Vec3f& playerPos, std::vector<PositionCellGrid>& exteriorPositions);
         void preloadCellWithSurroundings(MWWorld::CellStore& cell);
         void preloadCell(MWWorld::CellStore& cell);
-        void preloadTerrain(const osg::Vec3f& pos, ESM::RefId worldspace, bool sync = false);
 
         osg::Vec4i gridCenterToBounds(const osg::Vec2i& centerCell) const;
         osg::Vec2i getNewGridCenter(const osg::Vec3f& pos, const osg::Vec2i* currentGridCenter = nullptr) const;
@@ -141,6 +140,9 @@ namespace MWWorld
             const DetourNavigator::UpdateGuard* navigatorUpdateGuard);
 
     public:
+        void preloadTerrain(const osg::Vec3f& pos, ESM::RefId worldspace, bool sync = false,
+            const std::string& loadingLabel = std::string());
+
         Scene(MWWorld::World& world, MWRender::RenderingManager& rendering, MWPhysics::PhysicsSystem* physics,
             DetourNavigator::Navigator& navigator);
 

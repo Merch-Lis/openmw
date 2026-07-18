@@ -21,6 +21,7 @@ namespace Settings
 
         SettingValue<bool> mForcePerPixelLighting{ mIndex, "Shaders", "force per pixel lighting" };
         SettingValue<bool> mClampLighting{ mIndex, "Shaders", "clamp lighting" };
+        SettingValue<bool> mClampLightingActors{ mIndex, "Shaders", "clamp lighting actors" };
         SettingValue<bool> mAutoUseObjectNormalMaps{ mIndex, "Shaders", "auto use object normal maps" };
         SettingValue<bool> mAutoUseObjectSpecularMaps{ mIndex, "Shaders", "auto use object specular maps" };
         SettingValue<bool> mAutoUseTerrainNormalMaps{ mIndex, "Shaders", "auto use terrain normal maps" };

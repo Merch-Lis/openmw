@@ -23,6 +23,7 @@ namespace Settings
         SettingValue<float> mAutoExposureSpeed{ mIndex, "Post Processing", "auto exposure speed",
             makeMaxStrictSanitizerFloat(0.0001f) };
         SettingValue<bool> mTransparentPostpass{ mIndex, "Post Processing", "transparent postpass" };
+        SettingValue<bool> mHdrChain{ mIndex, "Post Processing", "hdr chain" };
     };
 }
 

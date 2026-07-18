@@ -1145,8 +1145,22 @@ namespace MWWorld
         osg::Vec3f predictedPos = playerPos + moved / dt * mPredictionTime;
 
         if (mCurrentCell->isExterior())
+        {
             exteriorPositions.push_back(PositionCellGrid{
                 predictedPos, gridCenterToBounds(getNewGridCenter(predictedPos, &mCurrentGridCenter)) });
+
+            // v7.2 pessimistic perimeter preload: with async chunk production
+            // a grid shift swaps real cells for a paged chunk that may not be
+            // produced yet - stepping backward could leave a HOLE where a
+            // city stood for seconds. Preloading with a one-cell-SHRUNK grid
+            // keeps the paged versions of the active grid's outermost ring
+            // produced at all times, so any crossing in any direction finds
+            // its replacement chunk ready.
+            const osg::Vec4i bounds = gridCenterToBounds(mCurrentGridCenter);
+            const osg::Vec4i shrunk(bounds.x() + 1, bounds.y() + 1, bounds.z() - 1, bounds.w() - 1);
+            if (shrunk.x() < shrunk.z() && shrunk.y() < shrunk.w())
+                exteriorPositions.push_back(PositionCellGrid{ playerPos, shrunk });
+        }
 
         mLastPlayerPos = playerPos;
 
@@ -1280,7 +1294,7 @@ namespace MWWorld
         mPreloader->preload(cell, mRendering.getReferenceTime());
     }
 
-    void Scene::preloadTerrain(const osg::Vec3f& pos, ESM::RefId worldspace, bool sync)
+    void Scene::preloadTerrain(const osg::Vec3f& pos, ESM::RefId worldspace, bool sync, const std::string& loadingLabel)
     {
         if (mRendering.getTerrain()->getWorldspace() != worldspace)
             throw std::runtime_error("preloadTerrain can only work with the current exterior worldspace");
@@ -1295,7 +1309,7 @@ namespace MWWorld
         Loading::Listener* loadingListener = MWBase::Environment::get().getWindowManager()->getLoadingScreen();
         Loading::ScopedLoad load(loadingListener);
 
-        loadingListener->setLabel("#{OMWEngine:InitializingData}");
+        loadingListener->setLabel(loadingLabel.empty() ? "#{OMWEngine:InitializingData}" : loadingLabel);
 
         mPreloader->syncTerrainLoad(*loadingListener);
     }

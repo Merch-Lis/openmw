@@ -2,6 +2,7 @@
 #define OPENMW_MWRENDER_RENDERINGMANAGER_H
 
 #include "objects.hpp"
+#include "objectpaging.hpp"
 #include "renderinginterface.hpp"
 #include "rendermode.hpp"
 
@@ -50,6 +51,7 @@ namespace ESM
 namespace Terrain
 {
     class World;
+    class TerrainOccluder;
 }
 
 namespace Fallback
@@ -59,6 +61,7 @@ namespace Fallback
 
 namespace SceneUtil
 {
+    class OcclusionCuller;
     class ShadowManager;
     class WorkQueue;
     class LightManager;
@@ -100,6 +103,7 @@ namespace MWRender
     class Water;
     class TerrainStorage;
     class LandManager;
+    class SceneOcclusionCallback;
     class NavMesh;
     class ActorsPaths;
     class RecastMesh;
@@ -142,6 +146,16 @@ namespace MWRender
         const osg::Vec4f& getSunLightPosition() const { return mSunLight->getPosition(); }
         void setSunDirection(const osg::Vec3f& direction);
         void setSunColour(const osg::Vec4f& diffuse, const osg::Vec4f& specular, float sunVis);
+
+        // MGE XE parity: weather identity + sky colour for the ported MGE shaders
+        void setMgeScattering(const osg::Vec4f& outScatter, const osg::Vec4f& inScatter, bool enable);
+
+        void setMgeWeather(float niceWeather, const osg::Vec4f& skyColor, float dlFogFactor, float dlFogOffset,
+            bool isExterior, float dlFogFactorCur = -1.f, float dlFogOffsetCur = 0.f, float dlFogFactorNext = -1.f,
+            float dlFogOffsetNext = 0.f, float dlFogBlend = 0.f);
+        // v7 distant-land generation support
+        void drainObjectPagingWriteQueue();
+        void clearObjectPagingCache();
         void setNight(bool isNight) { mNight = isNight; }
 
         void configureAmbient(const MWWorld::Cell& cell);
@@ -190,6 +204,9 @@ namespace MWRender
         osg::Vec2f getScreenCoords(const osg::BoundingBox& bb);
 
         void setSkyEnabled(bool enabled);
+        /// mge-exact tier-2 reactivity: diff the resident distant statics
+        /// against the loaded save state, regenerate stale supercells.
+        void refreshDistantStatics(const ObjectPaging::RefStateMap& refStates);
 
         bool toggleRenderMode(RenderMode mode);
 
@@ -313,7 +330,19 @@ namespace MWRender
 
         osg::ref_ptr<IntersectionVisitorWithIgnoreList> mIntersectionVisitor;
 
+        osg::ref_ptr<osg::Uniform> mClampActorsGateUniform;
+        osg::ref_ptr<osg::Group> mDistantStaticsRoot;
+        std::filesystem::path mDistantStaticsDir;
         osg::ref_ptr<osgViewer::Viewer> mViewer;
+        osg::ref_ptr<osg::Uniform> mMgeNiceWeatherUniform;
+        osg::ref_ptr<osg::Uniform> mMgeSkyColorUniform;
+        osg::ref_ptr<osg::Uniform> mMgeFogParamsUniform;
+        osg::ref_ptr<osg::Uniform> mMgeFogParamsCurUniform;
+        osg::ref_ptr<osg::Uniform> mMgeFogParamsNextUniform;
+        osg::ref_ptr<osg::Uniform> mMgeOutscatterUniform;
+        osg::ref_ptr<osg::Uniform> mMgeInscatterUniform;
+        osg::ref_ptr<osg::Uniform> mMgeScatterOnUniform;
+        osg::ref_ptr<osg::Uniform> mMgeSunDirUniform;
         osg::ref_ptr<osg::Group> mRootNode;
         osg::ref_ptr<SceneUtil::LightManager> mSceneRoot;
         Resource::ResourceSystem* mResourceSystem;
@@ -340,6 +369,9 @@ namespace MWRender
         std::unique_ptr<ScreenshotManager> mScreenshotManager;
         std::unique_ptr<EffectManager> mEffectManager;
         std::unique_ptr<SceneUtil::ShadowManager> mShadowManager;
+        osg::ref_ptr<SceneUtil::OcclusionCuller> mOcclusionCuller;
+        osg::ref_ptr<SceneOcclusionCallback> mSceneOcclusionCallback;
+        std::unique_ptr<Terrain::TerrainOccluder> mTerrainOccluder;
         osg::ref_ptr<PostProcessor> mPostProcessor;
         osg::ref_ptr<NpcAnimation> mPlayerAnimation;
         osg::ref_ptr<SceneUtil::PositionAttitudeTransform> mPlayerNode;

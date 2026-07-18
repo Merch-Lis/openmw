@@ -233,6 +233,10 @@ namespace MWBase
 
         virtual float getWeatherTransition() const = 0;
 
+        // XE Sky Variations port: daily scattering override for
+        // the MGE shader layer, driven from Lua (core.weather).
+        virtual void setMgeScattering(const osg::Vec4f& outScatter, const osg::Vec4f& inScatter, bool enable) = 0;
+
         virtual unsigned int getNightDayMode() const = 0;
 
         virtual int getMasserPhase() const = 0;
@@ -373,6 +377,10 @@ namespace MWBase
         virtual void disableDeferredPreviewRotation() = 0;
 
         virtual void saveLoaded(const ESM::ESMReader& reader) = 0;
+
+        /// mge-exact: diff the resident distant statics against the current
+        /// world state (called after a save finished loading)
+        virtual void refreshDistantStatics() {}
 
         virtual void setupPlayer() = 0;
         virtual void renderPlayer() = 0;
