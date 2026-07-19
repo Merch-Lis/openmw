@@ -127,6 +127,18 @@ vec4 mgeGetFogParams() // (ff, fo, isExterior, isDay)
 uniform vec4 mgeFogParamsCur;
 uniform vec4 mgeFogParamsNext;
 
+// Dense-weather response knees (authored on top of XE): the weights ramp in
+// as the per-weather fog ratio ff drops below Cloudy (ff = 0.9).
+const float mgeDenseKneeStart = 0.9;  // ff at which dense-weather terms begin
+const float mgeDenseKneeWidth = 0.4;  // full dense weight at ff = 0.5
+const float mgeLayerKneeWidth = 0.2;  // full layer/pull-in weight at ff = 0.7
+const float mgeFogStartPullIn = 0.65; // dense weather shrinks the clear-air fog start to 65%
+// XE adjustFog verbatim: the linear near-fog range is fitted to the exp
+// curve at this distance and at min(fogEnd, nearViewRange).
+const float mgeNearFitDist = 1280.0;
+// XE Common.fx verbatim: inscatter colour distance scale (see header).
+const float mgeInscatterDistScale = 0.224;
+
 struct MgeFogDerived
 {
     float expStart;   // exp curve start [units]
@@ -146,11 +158,11 @@ MgeFogDerived mgeDeriveFogAt(float ff, float fo)
     float fogStart = ff * awStart + (lg / (1.0 + lg)) * d.fogEnd;
     // dense-weather pull-in: the clear-air start shrinks by up to 35% as
     // the envelope compresses; Clear/Cloudy unaffected
-    fogStart *= mix(1.0, 0.65, clamp((0.9 - ff) / 0.2, 0.0, 1.0));
+    fogStart *= mix(1.0, mgeFogStartPullIn, clamp((mgeDenseKneeStart - ff) / mgeLayerKneeWidth, 0.0, 1.0));
     d.expStart = fogStart * mgeCell / mgeExpFogDistScale;
     d.expDiv = (d.fogEnd * mgeCell - d.expStart) / mgeExpFogDistScale;
-    d.wDense = clamp((0.9 - ff) / 0.4, 0.0, 1.0);
-    d.wLayer = clamp((0.9 - ff) / 0.2, 0.0, 1.0);
+    d.wDense = clamp((mgeDenseKneeStart - ff) / mgeDenseKneeWidth, 0.0, 1.0);
+    d.wLayer = clamp((mgeDenseKneeStart - ff) / mgeLayerKneeWidth, 0.0, 1.0);
     return d;
 }
 
@@ -385,10 +397,10 @@ vec4 mgeFogColourWorld(float dist, vec3 dirWorld, float far, vec3 skyCol, bool u
         // 4000u: ~60% fogged vs ~83% pure-exp); running the exp curve at
         // all ranges washes out close objects.
         float farIntercept = min(fogEnd * mgeCell, mgeNearViewRange);
-        float eN = exp(-(1280.0 - fogExpStart) / fogExpDivisor);
+        float eN = exp(-(mgeNearFitDist - fogExpStart) / fogExpDivisor);
         float eF = exp(-(farIntercept - fogExpStart) / fogExpDivisor);
-        float fogNearStart = 1280.0 + (farIntercept - 1280.0) * (1.0 - eN) / (eF - eN);
-        float fogNearEnd = 1280.0 + (farIntercept - 1280.0) * (0.0 - eN) / (eF - eN);
+        float fogNearStart = mgeNearFitDist + (farIntercept - mgeNearFitDist) * (1.0 - eN) / (eF - eN);
+        float fogNearEnd = mgeNearFitDist + (farIntercept - mgeNearFitDist) * (0.0 - eN) / (eF - eN);
         fog = clamp((fogNearEnd - distEff) / (fogNearEnd - fogNearStart), 0.0, 1.0);
     }
     else
@@ -400,7 +412,7 @@ vec4 mgeFogColourWorld(float dist, vec3 dirWorld, float far, vec3 skyCol, bool u
     const float mgeFogFloor = 0.04;
     fog = mix(fog, max(fog, mgeFogFloor), wDense);
 
-    float fogdist = clamp(0.224 * x, 0.0, 1.0);
+    float fogdist = clamp(mgeInscatterDistScale * x, 0.0, 1.0);
 
     // Bad-weather / base colour invariant: fog on
     // geometry must be exactly as solid as - and never more than - the

@@ -33,6 +33,12 @@ const float REFL_BUMP = 0.07;                      // reflection distortion amou
                                                    // (stock 0.10; reduced - narrows the pale
                                                    // contact halo where island shores meet their reflection)
 const float REFR_BUMP = 0.07;                      // refraction distortion amount
+// XE Mod Water.fx UnderwaterPS verbatim: from-below fresnel curve and the
+// distance constant of the refraction-to-fog fade.
+const float MGE_UW_FRESNEL_BIAS = 1.12;
+const float MGE_UW_FRESNEL_SLOPE = 0.65;
+const float MGE_UW_FRESNEL_POWER = 8.0;
+const float MGE_UW_REFRACTION_FADE = 500.0;
 
 #if @sunlightScattering
 const float SCATTER_AMOUNT = 0.3;                  // amount of sunlight scattering
@@ -167,7 +173,7 @@ void main(void)
         // (critical angle 49 deg) which mirrors most of the surface. From
         // below the surface mostly shows the refracted above-water world.
         float fcos = clamp(dot(viewDir, normal), 0.0, 1.0);
-        fresnel = pow(clamp(1.12 - 0.65 * fcos, 0.0, 1.0), 8.0);
+        fresnel = pow(clamp(MGE_UW_FRESNEL_BIAS - MGE_UW_FRESNEL_SLOPE * fcos, 0.0, 1.0), MGE_UW_FRESNEL_POWER);
     }
 
     vec2 screenCoordsOffset = normal.xy * REFL_BUMP;
@@ -231,7 +237,7 @@ void main(void)
         // z-squashed (water.cpp refraction clip + scale), and unfogged it
         // reads as a displaced copy of the seafloor on the surface.
         float uwDist = length(position.xyz - cameraPos.xyz);
-        refraction = mix(gl_Fog.color.rgb, clamp(refraction * 1.5, 0.0, 1.0), exp(-uwDist / 500.0));
+        refraction = mix(gl_Fog.color.rgb, clamp(refraction * 1.5, 0.0, 1.0), exp(-uwDist / MGE_UW_REFRACTION_FADE));
     }
     else
     {
