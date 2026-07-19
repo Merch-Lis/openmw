@@ -36,6 +36,14 @@ Identical to upstream OpenMW 0.51.0 — see the [official build
 instructions](https://wiki.openmw.org/index.php?title=Development_Environment_Setup).
 No new dependencies beyond the vendored `extern/masked-occlusion-culling`.
 
+Note: this fork concentrates the distant-land code in
+`apps/openmw/mwrender/renderingmanager.cpp`, which makes that translation
+unit large. On some MSVC toolsets the linker may reject its debug info with
+`LNK1103: debugging information corrupt`. If you hit it, build the Release
+target without linker debug info (`GenerateDebugInformation=false` /
+`/DEBUG:NONE`) — a distributed Release binary needs no PDB — or use a stable
+VS 2022 toolchain.
+
 ## Companion downloads (not in this repo)
 
 - The **shader pack** (omwfx ports of the MGE-era shaders, with the MGE
