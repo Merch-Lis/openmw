@@ -232,6 +232,16 @@ bool mgeCamAboveWater()
     return dot(vm[0], cross(vm[1], vm[2])) < 0.0; // mirrored handedness
 }
 
+// Underwater exponential-murk fade distance (transmittance 1/e here). Shared
+// by the below-water fog above and by the reflection/refraction fades in
+// water.frag so all three converge to gl_Fog.color at one rate. Derived from
+// the underwater fog end (settings 'mge underwater fog end cells') so that
+// remains the single live tuning knob; falls back if the range is unset.
+float mgeUwFogDist()
+{
+    return (gl_Fog.end > 1.0 && gl_Fog.end < 1000000.0) ? gl_Fog.end * 0.33 : 800.0;
+}
+
 // Core scatter equation — XE Common.fx fogColourScatter nice branch,
 // verbatim (live 0.18 constants). fogdist in [0,1].
 vec3 mgeScatter(vec3 dir, float fogdist, vec3 skyCol)
@@ -318,13 +328,24 @@ vec4 mgeFogColourWorld(float dist, vec3 dirWorld, float far, vec3 skyCol, bool u
 
     vec4 p = mgeGetFogParams();
 
-    if (p.z < 0.5 || !mgeCamAboveWater())
+    if (p.z < 0.5)
     {
-        // Interior or underwater at sea level: MGE runs plain linear fog to
-        // the palette colour there (adjustFog interior / below-water branch);
-        // OpenMW's gl_Fog params carry the matching vanilla ranges.
+        // Interior: MGE runs plain linear fog to the palette colour
+        // (adjustFog interior branch); gl_Fog carries the matching ranges.
         float f = clamp((gl_Fog.end - dist) / max(gl_Fog.end - gl_Fog.start, 1.0), 0.0, 1.0);
         return vec4((1.0 - f) * gl_Fog.color.xyz, f);
+    }
+    if (!mgeCamAboveWater())
+    {
+        // Exterior underwater: one smooth exponential murk. A linear chord
+        // clamps to full fog at a fixed distance -> a fixed world-elevation
+        // ring that reads as a hard horizontal line sliding with camera
+        // pitch; exp has no such kink and reaches clear (T=1) at the camera.
+        // The water surface, seabed, and the reflection/refraction fades in
+        // water.frag all converge to gl_Fog.color on THIS same law, so the
+        // from-below view is a single medium instead of stacked bands.
+        float T = exp(-dist / mgeUwFogDist());
+        return vec4((1.0 - T) * gl_Fog.color.xyz, T);
     }
 
     // Engine-side range setup (adjustFog), in shader because OpenMW's fog

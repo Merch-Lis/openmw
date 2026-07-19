@@ -38,7 +38,6 @@ const float REFR_BUMP = 0.07;                      // refraction distortion amou
 const float MGE_UW_FRESNEL_BIAS = 1.12;
 const float MGE_UW_FRESNEL_SLOPE = 0.65;
 const float MGE_UW_FRESNEL_POWER = 8.0;
-const float MGE_UW_REFRACTION_FADE = 500.0;
 
 #if @sunlightScattering
 const float SCATTER_AMOUNT = 0.3;                  // amount of sunlight scattering
@@ -188,6 +187,18 @@ void main(void)
     // reflection
     vec3 reflection = sampleReflectionMap(screenCoords + screenCoordsOffset).rgb;
 
+    // From below, fade the reflection to the underwater fog colour with the
+    // SAME exponential law as the refraction (below) and the below-water fog
+    // (mge_fog.glsl). The reflection RTT is the mirrored ABOVE-water scene
+    // fogged to the bright horizon, and it was the one from-below term never
+    // faded with distance - so at grazing angles (high fresnel) it stayed a
+    // bright mirror band that should physically have dissolved into murk.
+    // Beyond the ~48.6deg critical angle the surface mirrors the underwater
+    // hemisphere (murk), so fading to gl_Fog.color is the right stand-in.
+    if (cameraPos.z < 0.0)
+        reflection = mix(gl_Fog.color.rgb, reflection,
+            exp(-length(position.xyz - cameraPos.xyz) / mgeUwFogDist()));
+
     // MGE XE Mod Water.fx depthBaseColor: deep-water body colour is
     // WEATHER-LIT (sun + 2*sky + fog terms), not a fixed dark constant —
     // under a bright sky deep water stays mid-luminance instead of going
@@ -238,7 +249,7 @@ void main(void)
         // reads as a displaced copy of the seafloor on the surface.
         float uwDist = length(position.xyz - cameraPos.xyz);
         refraction = mix(gl_Fog.color.rgb, clamp(refraction * 1.5, 0.0, 1.0),
-            exp(-uwDist / MGE_UW_REFRACTION_FADE));
+            exp(-uwDist / mgeUwFogDist()));   // shared rate: reflection + fog converge here too
     }
     else
     {
