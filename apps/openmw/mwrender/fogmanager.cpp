@@ -69,6 +69,16 @@ namespace MWRender
             }
             mUnderwaterFogStart = std::min(viewDistance, 7168.f) * (1 - underwaterFog);
             mUnderwaterFogEnd = std::min(viewDistance, 7168.f);
+            // MGE XE below-water envelope (distantinit.cpp defaults -0.5/0.3
+            // cells): much denser than the vanilla-derived range, and the
+            // curve the underwater surface/reflection haze converges with.
+            const float uwEndCells = Settings::fog().mMgeUnderwaterFogEndCells;
+            if (uwEndCells != 0.f)
+            {
+                constexpr float cellSize = 8192.f;
+                mUnderwaterFogStart = Settings::fog().mMgeUnderwaterFogStartCells * cellSize;
+                mUnderwaterFogEnd = uwEndCells * cellSize;
+            }
         }
         mFogColor = color;
     }
