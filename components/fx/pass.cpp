@@ -175,21 +175,40 @@ mat4 omw_InvProjectionMatrix()
 #endif
     }
 
+    // FP16 chain safety. 8-bit chain buffers implicitly clamp every store to
+    // [0,1], which both sanitized NaN/Inf and bounded HDR so a bright-pass
+    // pow()/square could not overflow. Float (FP16) buffers do neither, so a
+    // very bright HDR value read here would overflow fp16 to +Inf inside a
+    // shader's own bright-pass target and become NaN, spreading as black blocks
+    // through the blur passes. Restore both properties at the point every shader
+    // reads the chain: a per-component NaN select (never multiply a NaN), then a
+    // clamp to a safe ceiling that kills +/-Inf and keeps downstream pow()/square
+    // under the fp16 limit (100^2.2 ~ 27000 << 65504; the tonemap whitepoint is
+    // ~11, so this is imperceptible). No-op on the 8-bit path.
+    vec4 omw_Sanitize(vec4 c)
+    {
+        c.x = (c.x == c.x) ? c.x : 0.0;
+        c.y = (c.y == c.y) ? c.y : 0.0;
+        c.z = (c.z == c.z) ? c.z : 0.0;
+        c.w = (c.w == c.w) ? c.w : 0.0;
+        return clamp(c, vec4(-100.0), vec4(100.0));
+    }
+
     vec4 omw_GetLastShader(vec2 uv)
     {
 #if OMW_MULTIVIEW
-        return omw_Texture2DArray(omw_SamplerLastShader, vec3(uv, gl_ViewID_OVR));
+        return omw_Sanitize(omw_Texture2DArray(omw_SamplerLastShader, vec3(uv, gl_ViewID_OVR)));
 #else
-        return omw_Texture2D(omw_SamplerLastShader, uv);
+        return omw_Sanitize(omw_Texture2D(omw_SamplerLastShader, uv));
 #endif
     }
 
     vec4 omw_GetLastPass(vec2 uv)
     {
 #if OMW_MULTIVIEW
-        return omw_Texture2DArray(omw_SamplerLastPass, vec3(uv, gl_ViewID_OVR));
+        return omw_Sanitize(omw_Texture2DArray(omw_SamplerLastPass, vec3(uv, gl_ViewID_OVR)));
 #else
-        return omw_Texture2D(omw_SamplerLastPass, uv);
+        return omw_Sanitize(omw_Texture2D(omw_SamplerLastPass, uv));
 #endif
     }
 
