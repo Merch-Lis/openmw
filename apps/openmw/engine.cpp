@@ -1187,8 +1187,8 @@ void OMW::Engine::generateDistantLand()
     const int nx = (maxX - minX) / spacing + 1;
     const int ny = (maxY - minY) / spacing + 1;
     const int total = nx * ny;
-    Log(Debug::Info) << "Distant land generation: cells [" << minX << "," << minY << "]..[" << maxX << ","
-                     << maxY << "], " << total << " lattice points";
+    Log(Debug::Info) << "Distant land generation: cells [" << minX << "," << minY << "]..[" << maxX << "," << maxY
+                     << "], " << total << " lattice points";
 
     MWRender::RenderingManager* rendering = mWorld->getRenderingManager();
     int done = 0;

@@ -8,25 +8,25 @@
 #include <unordered_map>
 #include <vector>
 
-#include <osg/LOD>
+#include <cstring>
 #include <osg/AlphaFunc>
 #include <osg/BlendFunc>
 #include <osg/CullFace>
 #include <osg/FrontFace>
 #include <osg/Geode>
+#include <osg/LOD>
 #include <osg/Material>
-#include <cstring>
-#include <set>
-#include <type_traits>
 #include <osg/MatrixTransform>
 #include <osg/Sequence>
 #include <osg/Switch>
+#include <osg/TriangleIndexFunctor>
 #include <osgAnimation/BasicAnimationManager>
 #include <osgParticle/ParticleProcessor>
 #include <osgParticle/ParticleSystemUpdater>
 #include <osgUtil/IncrementalCompileOperation>
-#include <osg/TriangleIndexFunctor>
 #include <osgUtil/Simplifier>
+#include <set>
+#include <type_traits>
 
 #include <algorithm>
 #include <atomic>
@@ -166,7 +166,7 @@ namespace MWRender
         public:
             ChunkCacheTextureTypeSerializer()
                 : osgDB::ObjectWrapper([]() -> osg::Object* { return new SceneUtil::TextureType; },
-                    "SceneUtil::TextureType", "osg::Object osg::StateAttribute SceneUtil::TextureType")
+                      "SceneUtil::TextureType", "osg::Object osg::StateAttribute SceneUtil::TextureType")
             {
             }
         };
@@ -181,14 +181,13 @@ namespace MWRender
         public:
             ChunkCachePATSerializer()
                 : osgDB::ObjectWrapper([]() -> osg::Object* { return new SceneUtil::PositionAttitudeTransform; },
-                    "SceneUtil::PositionAttitudeTransform",
-                    "osg::Object osg::Node osg::Group osg::Transform SceneUtil::PositionAttitudeTransform")
+                      "SceneUtil::PositionAttitudeTransform",
+                      "osg::Object osg::Node osg::Group osg::Transform SceneUtil::PositionAttitudeTransform")
             {
                 using PAT = SceneUtil::PositionAttitudeTransform;
                 using Vec3fSer = osgDB::PropByRefSerializer<PAT, osg::Vec3f>;
                 using QuatSer = osgDB::PropByRefSerializer<PAT, osg::Quat>;
-                addSerializer(
-                    new Vec3fSer("Position", osg::Vec3f(), &PAT::getPosition, &PAT::setPosition),
+                addSerializer(new Vec3fSer("Position", osg::Vec3f(), &PAT::getPosition, &PAT::setPosition),
                     osgDB::BaseSerializer::RW_VEC3F);
                 addSerializer(new QuatSer("Attitude", osg::Quat(), &PAT::getAttitude, &PAT::setAttitude),
                     osgDB::BaseSerializer::RW_QUAT);
@@ -224,7 +223,7 @@ namespace MWRender
         public:
             ChunkCacheRefnumMarkerSerializer()
                 : osgDB::ObjectWrapper([]() -> osg::Object* { return new MWRender::RefnumMarker; },
-                    "MWRender::RefnumMarker", "osg::Object MWRender::RefnumMarker")
+                      "MWRender::RefnumMarker", "osg::Object MWRender::RefnumMarker")
             {
                 addSerializer(new osgDB::UserSerializer<MWRender::RefnumMarker>(
                                   "Refnum", checkRefnumMarker, readRefnumMarker, writeRefnumMarker),
@@ -243,8 +242,8 @@ namespace MWRender
         public:
             ChunkCacheNifMatrixTransformSerializer()
                 : osgDB::ObjectWrapper([]() -> osg::Object* { return new NifOsg::MatrixTransform; },
-                    "NifOsg::MatrixTransform",
-                    "osg::Object osg::Node osg::Group osg::Transform osg::MatrixTransform NifOsg::MatrixTransform")
+                      "NifOsg::MatrixTransform",
+                      "osg::Object osg::Node osg::Group osg::Transform osg::MatrixTransform NifOsg::MatrixTransform")
             {
             }
         };
@@ -258,8 +257,8 @@ namespace MWRender
         public:
             ChunkCacheRemovedAlphaFuncSerializer()
                 : osgDB::ObjectWrapper([]() -> osg::Object* { return new Shader::RemovedAlphaFunc; },
-                    "Shader::RemovedAlphaFunc",
-                    "osg::Object osg::StateAttribute osg::AlphaFunc Shader::RemovedAlphaFunc")
+                      "Shader::RemovedAlphaFunc",
+                      "osg::Object osg::StateAttribute osg::AlphaFunc Shader::RemovedAlphaFunc")
             {
             }
         };
@@ -297,8 +296,8 @@ namespace MWRender
             for (const auto& mesh : d.mOccluderMeshes)
             {
                 os << osg::Vec3f(mesh.aabb._min) << osg::Vec3f(mesh.aabb._max)
-                   << static_cast<unsigned int>(mesh.vertices.size())
-                   << static_cast<unsigned int>(mesh.indices.size()) << std::endl;
+                   << static_cast<unsigned int>(mesh.vertices.size()) << static_cast<unsigned int>(mesh.indices.size())
+                   << std::endl;
                 for (const auto& v : mesh.vertices)
                     os << v;
                 os << std::endl;
@@ -313,7 +312,7 @@ namespace MWRender
         public:
             ChunkCachePagedOccluderDataSerializer()
                 : osgDB::ObjectWrapper([]() -> osg::Object* { return new MWRender::PagedOccluderData; },
-                    "MWRender::PagedOccluderData", "osg::Object MWRender::PagedOccluderData")
+                      "MWRender::PagedOccluderData", "osg::Object MWRender::PagedOccluderData")
             {
                 addSerializer(new osgDB::UserSerializer<MWRender::PagedOccluderData>("OccluderMeshes",
                                   checkPagedOccluderData, readPagedOccluderData, writePagedOccluderData),
@@ -357,11 +356,10 @@ namespace MWRender
                     if (image)
                     {
                         const double ms
-                            = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0)
-                                  .count();
+                            = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
                         if (ms > 1.0)
-                            Log(Debug::Verbose) << "Chunk cache image load " << std::fixed << std::setprecision(1)
-                                                << ms << "ms: " << file;
+                            Log(Debug::Verbose) << "Chunk cache image load " << std::fixed << std::setprecision(1) << ms
+                                                << "ms: " << file;
                         return osgDB::ReaderWriter::ReadResult(image, osgDB::ReaderWriter::ReadResult::FILE_LOADED);
                     }
                 }
@@ -416,7 +414,6 @@ namespace MWRender
             return h;
         }
     }
-
 
     // v7.1: fills a placeholder Group with the produced chunk on the update
     // traversal (main thread) - producer threads never touch the live graph.
@@ -530,8 +527,7 @@ namespace MWRender
             // createChunk races shared SceneManager state, so builds still
             // run one-at-a-time under sChunkBuildMutex regardless of pool
             // size - at most one build + main thread = stock's assumption.
-            const unsigned int threadCount
-                = std::clamp(Settings::terrain().mObjectPagingReadThreads.get(), 1, 8);
+            const unsigned int threadCount = std::clamp(Settings::terrain().mObjectPagingReadThreads.get(), 1, 8);
             for (unsigned int i = 0; i < threadCount; ++i)
                 mLoadThreads.emplace_back([this] { chunkLoadWorker(); });
         }
@@ -721,8 +717,8 @@ namespace MWRender
             std::string manifest = "format " + std::to_string(sChunkCacheVersion) + "\n";
             {
                 char buf[160];
-                std::snprintf(buf, sizeof(buf), "settings %.6g %.6g %.6g %.6g %.6g %.6g %.6g %d\n",
-                    mMinSize, mMergeFactor, mMinSizeMergeFactor, mMinSizeCostMultiplier,
+                std::snprintf(buf, sizeof(buf), "settings %.6g %.6g %.6g %.6g %.6g %.6g %.6g %d\n", mMinSize,
+                    mMergeFactor, mMinSizeMergeFactor, mMinSizeCostMultiplier,
                     static_cast<float>(Settings::terrain().mObjectPagingLandmarkSize),
                     static_cast<float>(Settings::terrain().mObjectPagingLandmarkRangeFactor),
                     static_cast<float>(Settings::terrain().mObjectPagingSimplifyStrength),
@@ -1059,8 +1055,8 @@ namespace MWRender
                     for (unsigned int i = 0; i < g->getNumPrimitiveSets(); ++i)
                     {
                         const osg::PrimitiveSet* ps = g->getPrimitiveSet(i);
-                        std::snprintf(buf, sizeof(buf), "%d/%u/", ps->getMode(),
-                            static_cast<unsigned int>(ps->getNumIndices()));
+                        std::snprintf(
+                            buf, sizeof(buf), "%d/%u/", ps->getMode(), static_cast<unsigned int>(ps->getNumIndices()));
                         line += buf;
                         if (const osg::DrawElements* de = ps->getDrawElements())
                         {
@@ -1243,8 +1239,7 @@ namespace MWRender
             osg::ref_ptr<osg::Array> normals;
             if (const osg::Array* src = geom.getNormalArray())
             {
-                if (src->getBinding() == osg::Array::BIND_PER_VERTEX
-                    && !(normals = compactArray(src, oldOfNew)))
+                if (src->getBinding() == osg::Array::BIND_PER_VERTEX && !(normals = compactArray(src, oldOfNew)))
                     return fail("normal-array-type");
             }
             osg::ref_ptr<osg::Array> colors;
@@ -1279,8 +1274,8 @@ namespace MWRender
         {
             if (mSimplifiedTemplates.size() > 4096) // bound memory on huge mod lists
                 mSimplifiedTemplates.clear();
-            osg::ref_ptr<osg::Node> copy = static_cast<osg::Node*>(
-                node->clone(osg::CopyOp::DEEP_COPY_NODES | osg::CopyOp::DEEP_COPY_DRAWABLES
+            osg::ref_ptr<osg::Node> copy
+                = static_cast<osg::Node*>(node->clone(osg::CopyOp::DEEP_COPY_NODES | osg::CopyOp::DEEP_COPY_DRAWABLES
                     | osg::CopyOp::DEEP_COPY_ARRAYS | osg::CopyOp::DEEP_COPY_PRIMITIVES));
             struct CollectGeometryVisitor : public osg::NodeVisitor
             {
@@ -1294,8 +1289,7 @@ namespace MWRender
                 void apply(osg::Drawable& d) override
                 {
                     osg::Geometry* geom = d.asGeometry();
-                    const size_t nv
-                        = geom && geom->getVertexArray() ? geom->getVertexArray()->getNumElements() : 0;
+                    const size_t nv = geom && geom->getVertexArray() ? geom->getVertexArray()->getNumElements() : 0;
                     // plain static Geometry only: rigged/morphing/custom
                     // drawables are handled (or skipped) by the chunk CopyOp
                     const char* skip = nullptr;
@@ -1344,8 +1338,7 @@ namespace MWRender
                 {
                     struct TriangleCollector
                     {
-                        osg::ref_ptr<osg::DrawElementsUInt> mElements
-                            = new osg::DrawElementsUInt(GL_TRIANGLES);
+                        osg::ref_ptr<osg::DrawElementsUInt> mElements = new osg::DrawElementsUInt(GL_TRIANGLES);
                         void operator()(unsigned int a, unsigned int b, unsigned int c)
                         {
                             mElements->push_back(a);
@@ -1384,8 +1377,7 @@ namespace MWRender
         return it->second.second.get();
     }
 
-    void ObjectPaging::writeCachedChunk(
-        osg::Node* node, const std::filesystem::path& file, bool pruneSiblingVariants)
+    void ObjectPaging::writeCachedChunk(osg::Node* node, const std::filesystem::path& file, bool pruneSiblingVariants)
     {
         registerChunkCacheSerializers();
         std::error_code ec;
@@ -1489,8 +1481,7 @@ namespace MWRender
         // Thread-unique counter: concurrent preload threads writing the same
         // chunk would interleave into one temp file and corrupt it.
         static std::atomic<unsigned int> sTmpCounter{ 0 };
-        const std::filesystem::path tmp
-            = file.string() + "." + std::to_string(sTmpCounter.fetch_add(1)) + ".tmp.osgb";
+        const std::filesystem::path tmp = file.string() + "." + std::to_string(sTmpCounter.fetch_add(1)) + ".tmp.osgb";
         // v15: attribute slimming - byte normals (12 -> 4 bytes/vert,
         // normalized), compact ub colors (16 -> 4), ushort indices where they
         // fit. Smaller files AND faster parses. Operates on NEW arrays set on
@@ -1528,7 +1519,8 @@ namespace MWRender
                         osg::ref_ptr<osg::Vec4ubArray> cb = new osg::Vec4ubArray();
                         cb->reserve(c->size());
                         for (const osg::Vec4f& v : *c)
-                            cb->push_back(osg::Vec4ub(static_cast<unsigned char>(osg::round(osg::clampBetween(v.x(), 0.f, 1.f) * 255.f)),
+                            cb->push_back(osg::Vec4ub(
+                                static_cast<unsigned char>(osg::round(osg::clampBetween(v.x(), 0.f, 1.f) * 255.f)),
                                 static_cast<unsigned char>(osg::round(osg::clampBetween(v.y(), 0.f, 1.f) * 255.f)),
                                 static_cast<unsigned char>(osg::round(osg::clampBetween(v.z(), 0.f, 1.f) * 255.f)),
                                 static_cast<unsigned char>(osg::round(osg::clampBetween(v.w(), 0.f, 1.f) * 255.f))));
@@ -1536,14 +1528,12 @@ namespace MWRender
                         cb->setNormalize(true);
                         geom->setColorArray(cb);
                     }
-                    const unsigned int nVerts
-                        = geom->getVertexArray() ? geom->getVertexArray()->getNumElements() : 0;
+                    const unsigned int nVerts = geom->getVertexArray() ? geom->getVertexArray()->getNumElements() : 0;
                     if (nVerts && nVerts <= 0xffffu)
                         for (unsigned int i = 0; i < geom->getNumPrimitiveSets(); ++i)
                             if (const auto* deu = dynamic_cast<const osg::DrawElementsUInt*>(geom->getPrimitiveSet(i)))
                             {
-                                osg::ref_ptr<osg::DrawElementsUShort> des
-                                    = new osg::DrawElementsUShort(deu->getMode());
+                                osg::ref_ptr<osg::DrawElementsUShort> des = new osg::DrawElementsUShort(deu->getMode());
                                 des->reserve(deu->size());
                                 for (const unsigned int idx : *deu)
                                     des->push_back(static_cast<unsigned short>(idx));
@@ -1584,21 +1574,21 @@ namespace MWRender
             const std::string fname = pruneSiblingVariants ? file.filename().string() : std::string();
             if (pruneSiblingVariants)
             {
-            const std::string::size_type lastSep = fname.rfind('_');
-            if (lastSep != std::string::npos)
-            {
-                const std::string prefix = fname.substr(0, lastSep + 1);
-                for (const auto& entry : std::filesystem::directory_iterator(file.parent_path(), ec))
+                const std::string::size_type lastSep = fname.rfind('_');
+                if (lastSep != std::string::npos)
                 {
-                    const std::string other = entry.path().filename().string();
-                    if (other.size() > prefix.size() && other.compare(0, prefix.size(), prefix) == 0
-                        && other.find(".tmp.") == std::string::npos && entry.path() != file)
+                    const std::string prefix = fname.substr(0, lastSep + 1);
+                    for (const auto& entry : std::filesystem::directory_iterator(file.parent_path(), ec))
                     {
-                        std::error_code ec2;
-                        std::filesystem::remove(entry.path(), ec2);
+                        const std::string other = entry.path().filename().string();
+                        if (other.size() > prefix.size() && other.compare(0, prefix.size(), prefix) == 0
+                            && other.find(".tmp.") == std::string::npos && entry.path() != file)
+                        {
+                            std::error_code ec2;
+                            std::filesystem::remove(entry.path(), ec2);
+                        }
                     }
                 }
-            }
             }
 
             // Write-verify mode: two-stage VALUE-LEVEL diff against the
@@ -1729,11 +1719,14 @@ namespace MWRender
                                                                                          : std::string("<none>");
                                     };
                                     if (imgName(txa) != imgName(txb))
-                                        out += " tex-image@" + std::to_string(u) + ":" + imgName(txa) + "|" + imgName(txb);
+                                        out += " tex-image@" + std::to_string(u) + ":" + imgName(txa) + "|"
+                                            + imgName(txb);
                                     if (txa->getWrap(osg::Texture::WRAP_S) != txb->getWrap(osg::Texture::WRAP_S)
                                         || txa->getWrap(osg::Texture::WRAP_T) != txb->getWrap(osg::Texture::WRAP_T)
-                                        || txa->getFilter(osg::Texture::MIN_FILTER) != txb->getFilter(osg::Texture::MIN_FILTER)
-                                        || txa->getFilter(osg::Texture::MAG_FILTER) != txb->getFilter(osg::Texture::MAG_FILTER))
+                                        || txa->getFilter(osg::Texture::MIN_FILTER)
+                                            != txb->getFilter(osg::Texture::MIN_FILTER)
+                                        || txa->getFilter(osg::Texture::MAG_FILTER)
+                                            != txb->getFilter(osg::Texture::MAG_FILTER))
                                         out += " tex-params@" + std::to_string(u);
                                 }
                                 else if (sa->compare(*sb) != 0)
@@ -1775,8 +1768,9 @@ namespace MWRender
                             {
                                 const osg::Geometry* gb = nb[i]->asGeometry();
                                 const auto ah = [](const osg::Array* arr) {
-                                    return arr ? ChunkStatsVisitor::hashBytes(arr->getDataPointer(), arr->getTotalDataSize())
-                                               : 0;
+                                    return arr
+                                        ? ChunkStatsVisitor::hashBytes(arr->getDataPointer(), arr->getTotalDataSize())
+                                        : 0;
                                 };
                                 if (ah(ga->getVertexArray()) != ah(gb->getVertexArray())
                                     || ah(ga->getNormalArray()) != ah(gb->getNormalArray())
@@ -1952,7 +1946,7 @@ namespace MWRender
             void handleCallbacks(const osg::Node* node, osg::Node* cloned) const
             {
                 for (const osg::Callback* callback = node->getCullCallback(); callback != nullptr;
-                     callback = callback->getNestedCallback())
+                    callback = callback->getNestedCallback())
                 {
                     if (callback->className() == std::string_view("BillboardCallback"))
                     {
@@ -2497,8 +2491,8 @@ namespace MWRender
                 else
                     model = mLODNameCache
                                 .emplace_hint(found, std::move(key),
-                                    Misc::ResourceHelpers::getLODMeshName(esmVersions()[refNum.mContentFile],
-                                        model, *mSceneManager->getVFS(), lod))
+                                    Misc::ResourceHelpers::getLODMeshName(
+                                        esmVersions()[refNum.mContentFile], model, *mSceneManager->getVFS(), lod))
                                 ->second;
             }
 
@@ -2605,8 +2599,7 @@ namespace MWRender
                 if (!activeGrid && minSizeMerged != minSize
                     && cnode->getBound().radius2() * ref.mScale * ref.mScale
                         < deterministicDistSqr * minSizeMerged * minSizeMerged
-                    && (landmarkSize <= 0.f
-                        || cnode->getBound().radius2() * ref.mScale * ref.mScale < landmarkSize2
+                    && (landmarkSize <= 0.f || cnode->getBound().radius2() * ref.mScale * ref.mScale < landmarkSize2
                         || cnode->getBound().radius2() * ref.mScale * ref.mScale
                             < deterministicDistSqr * minSizeMerged * minSizeMerged * landmarkInvFactor2))
                     continue;
@@ -2805,7 +2798,6 @@ namespace MWRender
         return group;
     }
 
-
     namespace
     {
         // ==== MWDS: flat binary supercell format ====
@@ -2938,13 +2930,25 @@ namespace MWRender
                         std::uint8_t cmIndex;
                         switch (m->getColorMode())
                         {
-                            case osg::Material::AMBIENT: cmIndex = 0; break;
-                            case osg::Material::DIFFUSE: cmIndex = 1; break;
-                            case osg::Material::SPECULAR: cmIndex = 2; break;
-                            case osg::Material::EMISSION: cmIndex = 3; break;
-                            case osg::Material::AMBIENT_AND_DIFFUSE: cmIndex = 4; break;
+                            case osg::Material::AMBIENT:
+                                cmIndex = 0;
+                                break;
+                            case osg::Material::DIFFUSE:
+                                cmIndex = 1;
+                                break;
+                            case osg::Material::SPECULAR:
+                                cmIndex = 2;
+                                break;
+                            case osg::Material::EMISSION:
+                                cmIndex = 3;
+                                break;
+                            case osg::Material::AMBIENT_AND_DIFFUSE:
+                                cmIndex = 4;
+                                break;
                             case osg::Material::OFF:
-                            default: cmIndex = 5; break;
+                            default:
+                                cmIndex = 5;
+                                break;
                         }
                         attrs.put(cmIndex);
                         for (const osg::Vec4& c : { m->getAmbient(osg::Material::FRONT_AND_BACK),
@@ -3039,8 +3043,8 @@ namespace MWRender
                     else if (dynamic_cast<const SceneUtil::TextureType*>(a))
                         texType = a->getName();
                     else
-                        Log(Debug::Error) << "MWDS: unserialized texture attribute (" << a->className() << ") in "
-                                          << file.filename();
+                        Log(Debug::Error)
+                            << "MWDS: unserialized texture attribute (" << a->className() << ") in " << file.filename();
                 }
                 if (!tex)
                     continue;
@@ -3118,8 +3122,7 @@ namespace MWRender
                         osg::ref_ptr<osg::Material> m = new osg::Material;
                         static const osg::Material::ColorMode cmModes[6]
                             = { osg::Material::AMBIENT, osg::Material::DIFFUSE, osg::Material::SPECULAR,
-                                osg::Material::EMISSION, osg::Material::AMBIENT_AND_DIFFUSE,
-                                osg::Material::OFF };
+                                  osg::Material::EMISSION, osg::Material::AMBIENT_AND_DIFFUSE, osg::Material::OFF };
                         m->setColorMode(cmModes[std::min<std::uint8_t>(in.get<std::uint8_t>(), 5)]);
                         m->setAmbient(osg::Material::FRONT_AND_BACK, in.get<osg::Vec4>());
                         m->setDiffuse(osg::Material::FRONT_AND_BACK, in.get<osg::Vec4>());
@@ -3225,8 +3228,8 @@ namespace MWRender
                             image = new osg::Image;
                             unsigned char* copy = new unsigned char[bytes];
                             std::memcpy(copy, data, bytes);
-                            image->setImage(s, t, 1, internalFormat, pixelFormat, dataType, copy,
-                                osg::Image::USE_NEW_DELETE);
+                            image->setImage(
+                                s, t, 1, internalFormat, pixelFormat, dataType, copy, osg::Image::USE_NEW_DELETE);
                         }
                     }
                 }
@@ -3244,8 +3247,7 @@ namespace MWRender
                 }
                 ss->setTextureAttributeAndModes(unit, tex, osg::StateAttribute::ON);
                 if (!texType.empty())
-                    ss->setTextureAttributeAndModes(
-                        unit, new SceneUtil::TextureType(texType), osg::StateAttribute::ON);
+                    ss->setTextureAttributeAndModes(unit, new SceneUtil::TextureType(texType), osg::StateAttribute::ON);
             }
             return ss;
         }
@@ -3303,8 +3305,8 @@ namespace MWRender
             if (!verts)
             {
                 Log(Debug::Error) << "MWDS: unsupported vertex array "
-                                  << (geom->getVertexArray() ? geom->getVertexArray()->className() : "null")
-                                  << " in " << file.filename();
+                                  << (geom->getVertexArray() ? geom->getVertexArray()->className() : "null") << " in "
+                                  << file.filename();
                 return false;
             }
             mwdsPutArray(out, verts);
@@ -3566,7 +3568,8 @@ namespace MWRender
         // class's end distance ('distant statics end *', 0 = horizon). Both
         // read current settings, so the in-game viewing-distance slider and
         // the class ends apply instantly - nothing is baked into the data.
-        class DistantBandCullCallback : public SceneUtil::NodeCallback<DistantBandCullCallback, osg::Node*, osgUtil::CullVisitor*>
+        class DistantBandCullCallback
+            : public SceneUtil::NodeCallback<DistantBandCullCallback, osg::Node*, osgUtil::CullVisitor*>
         {
         public:
             DistantBandCullCallback(const osg::Vec3f& centerLocal, float radius, int cls)
@@ -3584,9 +3587,15 @@ namespace MWRender
                 float end = 0.f;
                 switch (mClass)
                 {
-                    case 0: end = Settings::terrain().mDistantStaticsEndNear; break;
-                    case 1: end = Settings::terrain().mDistantStaticsEndFar; break;
-                    default: end = Settings::terrain().mDistantStaticsEndVeryFar; break;
+                    case 0:
+                        end = Settings::terrain().mDistantStaticsEndNear;
+                        break;
+                    case 1:
+                        end = Settings::terrain().mDistantStaticsEndFar;
+                        break;
+                    default:
+                        end = Settings::terrain().mDistantStaticsEndVeryFar;
+                        break;
                 }
                 if (end > 0.f && d - mRadius > end)
                     return; // beyond this size class's visible range
@@ -3665,8 +3674,7 @@ namespace MWRender
                     effective->merge(*ss);
                 MwdsOut ssOut;
                 mwdsWriteStateSet(ssOut, effective.get(), file);
-                const auto emplaced
-                    = bytesToRecord.emplace(ssOut.mBuf, static_cast<std::uint32_t>(records.size()));
+                const auto emplaced = bytesToRecord.emplace(ssOut.mBuf, static_cast<std::uint32_t>(records.size()));
                 if (emplaced.second)
                     records.push_back(std::move(ssOut.mBuf));
                 chainToRecord.emplace(g.mChain, emplaced.first->second);
@@ -3860,8 +3868,8 @@ namespace MWRender
         std::filesystem::path classFiles[3];
         for (int k = 0; k < 3; ++k)
             classFiles[k] = outDir / (std::string(namebuf) + sClassSuffix[k]);
-        const std::filesystem::path legacyFiles[2] = { outDir / (std::string(namebuf) + ".mwds"),
-            outDir / (std::string(namebuf) + ".osgb") };
+        const std::filesystem::path legacyFiles[2]
+            = { outDir / (std::string(namebuf) + ".mwds"), outDir / (std::string(namebuf) + ".osgb") };
         const std::filesystem::path stateFile = outDir / (std::string(namebuf) + ".state");
         {
             std::ifstream in(stateFile);
@@ -3994,11 +4002,9 @@ namespace MWRender
             copyop.copy(cnode, trans);
             copyop.mNodePath.pop_back();
             const int bx = std::clamp(
-                static_cast<int>(std::floor(ref.mPosition.x() / cellSizeUnits)) - startCell.x(), 0,
-                sSupercellSize - 1);
+                static_cast<int>(std::floor(ref.mPosition.x() / cellSizeUnits)) - startCell.x(), 0, sSupercellSize - 1);
             const int by = std::clamp(
-                static_cast<int>(std::floor(ref.mPosition.y() / cellSizeUnits)) - startCell.y(), 0,
-                sSupercellSize - 1);
+                static_cast<int>(std::floor(ref.mPosition.y() / cellSizeUnits)) - startCell.y(), 0, sSupercellSize - 1);
             blockGroup[cls][by * sSupercellSize + bx]->addChild(trans);
             ++instances;
         }
@@ -4028,8 +4034,7 @@ namespace MWRender
                 if (!writeSupercellFlat(worldCenter, classBlocks[k], classFiles[k]))
                 {
                     ++mWriteFailures;
-                    Log(Debug::Error) << "Failed to store supercell " << classFiles[k]
-                                      << " (write error - disk full?)";
+                    Log(Debug::Error) << "Failed to store supercell " << classFiles[k] << " (write error - disk full?)";
                 }
             }
             else
@@ -4046,12 +4051,11 @@ namespace MWRender
         }
         Log(Debug::Verbose) << "Supercell " << startCell.x() << "," << startCell.y() << ": refs " << refs.size()
                             << " instances " << instances << " exceptions " << dbgExceptions
-                            << (dbgFirstError.empty() ? "" : (" first=" + dbgFirstError))
-                            << " sidecar " << (sideOk ? "ok" : "WRITE FAILED");
+                            << (dbgFirstError.empty() ? "" : (" first=" + dbgFirstError)) << " sidecar "
+                            << (sideOk ? "ok" : "WRITE FAILED");
         outWritten = true;
         return hash;
     }
-
 
     namespace
     {
@@ -4097,8 +4101,7 @@ namespace MWRender
         }
         if (files.empty())
         {
-            Log(Debug::Warning) << "Distant statics: no globally-resident class files in " << dir
-                                << " (bake needed?)";
+            Log(Debug::Warning) << "Distant statics: no globally-resident class files in " << dir << " (bake needed?)";
             return 0;
         }
         mResidentDir = dir;
@@ -4136,11 +4139,10 @@ namespace MWRender
             attach->mDone = true;
             mResidentLoadActive = false;
             Log(Debug::Info) << "Distant statics resident: " << count << " supercells loaded in "
-                             << std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count()
-                             << "s";
+                             << std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() << "s";
         });
-        Log(Debug::Info) << "Distant statics: loading " << files.size() << " supercells in the background ("
-                         << threads << " threads)";
+        Log(Debug::Info) << "Distant statics: loading " << files.size() << " supercells in the background (" << threads
+                         << " threads)";
         return static_cast<unsigned int>(files.size());
     }
 
@@ -4247,8 +4249,8 @@ namespace MWRender
                     // always, ring classes only while inside the ring
                     if (ringCells[k] > 0 && !isRingLoaded(namebuf))
                         continue;
-                    const std::filesystem::path file
-                        = dir / (std::string("dl_") + std::to_string(cell.x()) + "_" + std::to_string(cell.y())
+                    const std::filesystem::path file = dir
+                        / (std::string("dl_") + std::to_string(cell.x()) + "_" + std::to_string(cell.y())
                             + sClassSuffix[k]);
                     osg::ref_ptr<osg::Node> node;
                     std::error_code fec;
@@ -4315,8 +4317,7 @@ namespace MWRender
         bool queued = false;
         std::lock_guard<std::mutex> lock(mRingMutex);
         // rings must never be outrun by the live viewing distance
-        const int viewCells
-            = static_cast<int>(std::ceil(Settings::camera().mViewingDistance / cellSize)) + S;
+        const int viewCells = static_cast<int>(std::ceil(Settings::camera().mViewingDistance / cellSize)) + S;
         for (int k = 0; k < 3; ++k)
         {
             const int r = ringCells[k] <= 0 ? 0 : std::max(ringCells[k], viewCells);
@@ -4342,8 +4343,7 @@ namespace MWRender
         {
             const auto& [cell, k] = it->second;
             const int r = (ringCells[k] <= 0 ? 0 : std::max(ringCells[k], viewCells)) + S;
-            if (cell.x() + S - 1 < pcx - r || cell.x() > pcx + r || cell.y() + S - 1 < pcy - r
-                || cell.y() > pcy + r)
+            if (cell.x() + S - 1 < pcx - r || cell.x() > pcx + r || cell.y() + S - 1 < pcy - r || cell.y() > pcy + r)
             {
                 mRingSwaps.emplace_back(it->first, nullptr);
                 it = mRingLoaded.erase(it);
@@ -4373,9 +4373,8 @@ namespace MWRender
                     if (mRingLoaded.find(name) == mRingLoaded.end())
                         continue; // unloaded while queued
                     lock.unlock();
-                    const std::filesystem::path file
-                        = mResidentDir / ("dl_" + std::to_string(cell.x()) + "_" + std::to_string(cell.y())
-                            + sClassSuffix[k]);
+                    const std::filesystem::path file = mResidentDir
+                        / ("dl_" + std::to_string(cell.x()) + "_" + std::to_string(cell.y()) + sClassSuffix[k]);
                     osg::ref_ptr<osg::Node> node;
                     std::error_code fec;
                     if (std::filesystem::exists(file, fec))

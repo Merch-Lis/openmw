@@ -27,9 +27,9 @@
 #include <components/resource/scenemanager.hpp>
 #include <components/sceneutil/lightmanager.hpp>
 #include <components/sceneutil/shadow.hpp>
-#include <components/shader/shadermanager.hpp>
 #include <components/settings/settings.hpp>
 #include <components/settings/values.hpp>
+#include <components/shader/shadermanager.hpp>
 #include <components/toutf8/toutf8.hpp>
 #include <components/version/version.hpp>
 #include <components/vfs/manager.hpp>
@@ -73,20 +73,13 @@ namespace
                 Files::MaybeQuotedPathContainer::value_type(), ""),
             "set local data directory (highest priority)");
         addOption("fallback-archive",
-            bpo::value<StringsVector>()
-                ->default_value(StringsVector(), "fallback-archive")
-                ->multitoken()
-                ->composing(),
+            bpo::value<StringsVector>()->default_value(StringsVector(), "fallback-archive")->multitoken()->composing(),
             "set fallback BSA archives (later archives have higher priority)");
-        addOption("content",
-            bpo::value<StringsVector>()->default_value(StringsVector(), "")->multitoken()->composing(),
+        addOption("content", bpo::value<StringsVector>()->default_value(StringsVector(), "")->multitoken()->composing(),
             "content file(s): esm/esp, or omwgame/omwaddon/omwscripts");
         addOption("encoding", bpo::value<std::string>()->default_value("win1252"), "character encoding");
         addOption("fallback",
-            bpo::value<Fallback::FallbackMap>()
-                ->default_value(Fallback::FallbackMap(), "")
-                ->multitoken()
-                ->composing(),
+            bpo::value<Fallback::FallbackMap>()->default_value(Fallback::FallbackMap(), "")->multitoken()->composing(),
             "fallback values");
         Files::ConfigurationManager::addCommonOptions(result);
         return result;
@@ -165,10 +158,7 @@ namespace
             return result;
         }
 
-        unsigned int nativeLodLevel(float size) const
-        {
-            return log2u(static_cast<unsigned int>(size / mMinSize));
-        }
+        unsigned int nativeLodLevel(float size) const { return log2u(static_cast<unsigned int>(size / mMinSize)); }
 
         unsigned int distanceLodLevel(float dist) const
         {
@@ -297,8 +287,7 @@ namespace
         // setup the map is empty and shader init fatals on e.g. useUBO).
         {
             osg::ref_ptr<SceneUtil::LightManager> lightDefineSource = new SceneUtil::LightManager;
-            Shader::ShaderManager::DefineMap globalDefines
-                = sceneManager.getShaderManager().getGlobalDefines();
+            Shader::ShaderManager::DefineMap globalDefines = sceneManager.getShaderManager().getGlobalDefines();
             for (const auto& [k, v] : SceneUtil::ShadowManager::getShadowsDisabledDefines())
                 globalDefines[k] = v;
             for (const auto& [k, v] : lightDefineSource->getLightDefines())
@@ -334,8 +323,8 @@ namespace
         const int rootSize = Misc::nextPowerOfTwo(std::max(origSizeX, origSizeY));
         const float rootCenterX = (minX + maxX) / 2.f + (rootSize - origSizeX) / 2.f;
         const float rootCenterY = (minY + maxY) / 2.f + (rootSize - origSizeY) / 2.f;
-        Log(Debug::Info) << "Land bounds [" << minX << "," << minY << "]..[" << maxX << "," << maxY << "], quadtree root "
-                         << rootSize << " @ (" << rootCenterX << "," << rootCenterY << ")";
+        Log(Debug::Info) << "Land bounds [" << minX << "," << minY << "]..[" << maxX << "," << maxY
+                         << "], quadtree root " << rootSize << " @ (" << rootCenterX << "," << rootCenterY << ")";
 
         NodeSelector selector;
         selector.mMinSize = Settings::terrain().mObjectPagingMinSize; // node granularity floor for OBJECT chunks
@@ -376,8 +365,8 @@ namespace
                         if (definedCells.count({ cx, cy }))
                             nearLand = true;
                 if (nearLand)
-                    lattice.emplace_back((x + 0.5f) * selector.mCellWorldSize, (y + 0.5f) * selector.mCellWorldSize,
-                        8192.f);
+                    lattice.emplace_back(
+                        (x + 0.5f) * selector.mCellWorldSize, (y + 0.5f) * selector.mCellWorldSize, 8192.f);
             }
         }
         Log(Debug::Info) << "Distant land generation: cells [" << minX << "," << minY << "]..[" << maxX << "," << maxY
@@ -418,8 +407,8 @@ namespace
                                   << " writes did not reach disk (out of disk space?).";
                 return 1;
             }
-            Log(Debug::Info) << "Distant land generation complete: " << sdone << "/" << cells.size()
-                             << " supercells, " << sbuilt << " built, " << sskipped << " already current";
+            Log(Debug::Info) << "Distant land generation complete: " << sdone << "/" << cells.size() << " supercells, "
+                             << sbuilt << " built, " << sskipped << " already current";
             return 0;
         }
 
@@ -428,12 +417,11 @@ namespace
         std::size_t skipped = 0;
         for (const osg::Vec3f& viewPoint : lattice)
         {
-            selector.select(viewPoint, rootCenterX, rootCenterY, static_cast<float>(rootSize),
-                [&](float cx, float cy, float size) {
+            selector.select(
+                viewPoint, rootCenterX, rootCenterY, static_cast<float>(rootSize), [&](float cx, float cy, float size) {
                     if (!baked.insert(BakeKey{ cx, cy, size }).second)
                         return;
-                    const MWRender::ChunkId id
-                        = std::make_tuple(osg::Vec2f(cx, cy), size, false);
+                    const MWRender::ChunkId id = std::make_tuple(osg::Vec2f(cx, cy), size, false);
                     const std::filesystem::path file = paging.diskCachePath(id);
                     if (file.empty())
                         throw std::runtime_error(

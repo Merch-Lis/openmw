@@ -68,7 +68,8 @@ namespace SceneUtil
         mShadowTechnique->setSplitPointDeltaBias(settings.mSplitPointBias);
 
         mShadowTechnique->setShadowUpdateInterval(settings.mShadowUpdateInterval);
-        mShadowTechnique->setFrustumExpansion(settings.mShadowFrustumExpansionBase, settings.mShadowFrustumExpansionPerSkip);
+        mShadowTechnique->setFrustumExpansion(
+            settings.mShadowFrustumExpansionBase, settings.mShadowFrustumExpansionPerSkip);
 
         mShadowTechnique->setPolygonOffset(settings.mPolygonOffsetFactor, settings.mPolygonOffsetUnits);
 

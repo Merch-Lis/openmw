@@ -283,9 +283,8 @@ namespace MWLua
         api["setMgeScattering"] = [](const Misc::Color& outScatter, const Misc::Color& inScatter) {
             MWBase::Environment::get().getWorld()->setMgeScattering(outScatter.toVec(), inScatter.toVec(), true);
         };
-        api["clearMgeScattering"] = []() {
-            MWBase::Environment::get().getWorld()->setMgeScattering(osg::Vec4f(), osg::Vec4f(), false);
-        };
+        api["clearMgeScattering"]
+            = []() { MWBase::Environment::get().getWorld()->setMgeScattering(osg::Vec4f(), osg::Vec4f(), false); };
 
         return LuaUtil::makeReadOnly(api);
     }

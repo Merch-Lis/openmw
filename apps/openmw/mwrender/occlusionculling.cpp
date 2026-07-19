@@ -412,8 +412,7 @@ namespace MWRender
                                  << " bldg tris=" << bldgTris << " bldg verts=" << bldgVerts
                                  << " total tris=" << (terrainTris + bldgTris)
                                  << " total verts=" << (terrainVerts + bldgVerts)
-                                 << " tested=" << mCuller->getNumTested()
-                                 << " occluded=" << mCuller->getNumOccluded();
+                                 << " tested=" << mCuller->getNumTested() << " occluded=" << mCuller->getNumOccluded();
             }
         }
     }
@@ -475,8 +474,8 @@ namespace MWRender
                                 continue;
 
                             mCuller->rasterizeOccluder(occMesh.vertices, occMesh.indices);
-                            mCuller->incrementBuildingOccluders(newTris,
-                                static_cast<unsigned int>(occMesh.vertices.size()));
+                            mCuller->incrementBuildingOccluders(
+                                newTris, static_cast<unsigned int>(occMesh.vertices.size()));
                         }
                         break;
                     }
@@ -489,8 +488,7 @@ namespace MWRender
 
     CellOcclusionCallback::CellOcclusionCallback(SceneUtil::OcclusionCuller* culler, float occluderMinRadius,
         float occluderMaxRadius, float occluderShrinkFactor, int occluderMeshResolution, int occluderMaxMeshResolution,
-        float occluderInsideThreshold, float occluderMaxDistance, bool enableStaticOccluders,
-        unsigned int maxTriangles)
+        float occluderInsideThreshold, float occluderMaxDistance, bool enableStaticOccluders, unsigned int maxTriangles)
         : mCuller(culler)
         , mOccluderMinRadius(occluderMinRadius)
         , mOccluderMaxRadius(occluderMaxRadius)
@@ -582,8 +580,7 @@ namespace MWRender
                                         continue;
 
                                     unsigned int newTris = static_cast<unsigned int>(occMesh.indices.size() / 3);
-                                    if (mMaxTriangles > 0
-                                        && mCuller->getNumBuildingTris() + newTris > mMaxTriangles)
+                                    if (mMaxTriangles > 0 && mCuller->getNumBuildingTris() + newTris > mMaxTriangles)
                                         continue;
 
                                     mCuller->rasterizeOccluder(occMesh.vertices, occMesh.indices);
@@ -629,8 +626,7 @@ namespace MWRender
                         if (!scaledBB.contains(cv->getEyePoint()))
                         {
                             unsigned int newTris = static_cast<unsigned int>(mesh.indices.size() / 3);
-                            if (mMaxTriangles == 0
-                                || mCuller->getNumBuildingTris() + newTris <= mMaxTriangles)
+                            if (mMaxTriangles == 0 || mCuller->getNumBuildingTris() + newTris <= mMaxTriangles)
                             {
                                 mCuller->rasterizeOccluder(mesh.vertices, mesh.indices);
                                 mCuller->incrementBuildingOccluders(

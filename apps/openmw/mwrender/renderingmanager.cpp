@@ -8,9 +8,9 @@
 #include <osg/Group>
 #include <osg/Light>
 #include <osg/Material>
-#include <osg/PolygonOffset>
 #include <osg/Matrix>
 #include <osg/PolygonMode>
+#include <osg/PolygonOffset>
 #include <osg/UserDataContainer>
 
 #include <osgUtil/LineSegmentIntersector>
@@ -276,9 +276,8 @@ namespace MWRender
             const bool debugMessages = Settings::camera().mOcclusionDebugMessages;
             const bool enableInteriors = Settings::camera().mOcclusionCullingInteriors;
             const unsigned int maxTriangles = static_cast<unsigned int>(Settings::camera().mOcclusionMaxTriangles);
-            mSceneOcclusionCallback = new SceneOcclusionCallback(
-                mOcclusionCuller, mTerrainOccluder.get(), radius, enableTerrain, debugOverlay, debugMessages,
-                enableInteriors);
+            mSceneOcclusionCallback = new SceneOcclusionCallback(mOcclusionCuller, mTerrainOccluder.get(), radius,
+                enableTerrain, debugOverlay, debugMessages, enableInteriors);
             sceneRoot->addCullCallback(mSceneOcclusionCallback);
 
             const float occluderMinRadius = Settings::camera().mOcclusionOccluderMinRadius;
@@ -347,7 +346,6 @@ namespace MWRender
                     mDistantStaticsRoot = nullptr;
             }
         }
-
 
         // water goes after terrain for correct waterculling order
         mWater = std::make_unique<Water>(
@@ -660,9 +658,9 @@ namespace MWRender
         // isDay from mNight (set by WeatherManager just before this call).
         // MGE equivalent: updateSun flips sunPos.z downward when sunVis==0 so
         // the scattering sees a below-horizon sun at night.
-        mMgeFogParamsUniform->set(
-            osg::Vec4f(dlFogFactor, dlFogOffset, isExterior ? 1.f : 0.f, mNight ? 0.f : 1.f));
-        mMgeFogParamsCurUniform->set(osg::Vec4f(dlFogFactorCur, dlFogOffsetCur, dlFogFactorCur >= 0.f ? 1.f : 0.f, 0.f));
+        mMgeFogParamsUniform->set(osg::Vec4f(dlFogFactor, dlFogOffset, isExterior ? 1.f : 0.f, mNight ? 0.f : 1.f));
+        mMgeFogParamsCurUniform->set(
+            osg::Vec4f(dlFogFactorCur, dlFogOffsetCur, dlFogFactorCur >= 0.f ? 1.f : 0.f, 0.f));
         mMgeFogParamsNextUniform->set(osg::Vec4f(dlFogFactorNext, dlFogOffsetNext, dlFogBlend, 0.f));
     }
 

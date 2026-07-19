@@ -1,23 +1,22 @@
 #ifndef OPENMW_MWRENDER_OBJECTPAGING_H
 #define OPENMW_MWRENDER_OBJECTPAGING_H
 
-#include <components/esm3/refnum.hpp>
-#include <components/resource/resourcemanager.hpp>
 #include <atomic>
 #include <chrono>
+#include <climits>
+#include <components/esm3/refnum.hpp>
+#include <components/resource/resourcemanager.hpp>
 #include <condition_variable>
 #include <cstdint>
-#include <filesystem>
-#include <climits>
-#include <condition_variable>
 #include <deque>
+#include <filesystem>
 #include <map>
 #include <thread>
 
 #include <components/terrain/quadtreeworld.hpp>
 
-#include <osg/ref_ptr>
 #include <osg/LOD>
+#include <osg/ref_ptr>
 
 #include <mutex>
 
@@ -119,7 +118,8 @@ namespace MWRender
         /// Tier-2 reactivity: recompute every supercell's state hash against the
         /// given save state, regenerate stale ones in the background and hot-swap
         /// them into the resident root. No-op while a previous refresh runs.
-        void refreshResidentSupercells(const RefStateMap& refStates, const std::filesystem::path& dir, osg::Group* root);
+        void refreshResidentSupercells(
+            const RefStateMap& refStates, const std::filesystem::path& dir, osg::Group* root);
         std::atomic<bool> mResidentDistantStatics{ false };
         std::atomic<bool> mResidentLoadActive{ false };
         std::atomic<bool> mResidentShutdown{ false };
@@ -192,8 +192,7 @@ namespace MWRender
         // (pointer identity stays valid and unique across resource-cache
         // clears) alongside the simplified copy.
         std::mutex mSimplifiedTemplatesMutex;
-        std::map<std::pair<const osg::Node*, float>,
-            std::pair<osg::ref_ptr<const osg::Node>, osg::ref_ptr<osg::Node>>>
+        std::map<std::pair<const osg::Node*, float>, std::pair<osg::ref_ptr<const osg::Node>, osg::ref_ptr<osg::Node>>>
             mSimplifiedTemplates;
         const osg::Node* getSimplifiedTemplate(
             const osg::Node* node, float ratio, Resource::TemplateMultiRef& templateRefs);

@@ -1,8 +1,8 @@
 #ifndef OPENMW_MWRENDER_RENDERINGMANAGER_H
 #define OPENMW_MWRENDER_RENDERINGMANAGER_H
 
-#include "objects.hpp"
 #include "objectpaging.hpp"
+#include "objects.hpp"
 #include "renderinginterface.hpp"
 #include "rendermode.hpp"
 

@@ -1,7 +1,7 @@
 #include "objects.hpp"
 
-#include <osg/Group>
 #include <components/settings/values.hpp>
+#include <osg/Group>
 #include <osg/UserDataContainer>
 
 #include <components/esm3/loaddoor.hpp>
@@ -106,8 +106,7 @@ namespace MWRender
     {
         insertBegin(ptr);
         ptr.getRefData().getBaseNode()->setNodeMask(Mask_Actor);
-        ptr.getRefData().getBaseNode()->getOrCreateStateSet()->addUniform(
-            new osg::Uniform("uClampLightingActor", 1.f));
+        ptr.getRefData().getBaseNode()->getOrCreateStateSet()->addUniform(new osg::Uniform("uClampLightingActor", 1.f));
 
         bool animated = true;
         std::string animationMesh
@@ -131,8 +130,7 @@ namespace MWRender
     {
         insertBegin(ptr);
         ptr.getRefData().getBaseNode()->setNodeMask(Mask_Actor);
-        ptr.getRefData().getBaseNode()->getOrCreateStateSet()->addUniform(
-            new osg::Uniform("uClampLightingActor", 1.f));
+        ptr.getRefData().getBaseNode()->getOrCreateStateSet()->addUniform(new osg::Uniform("uClampLightingActor", 1.f));
 
         if (ptr.getType() == ESM::REC_NPC_4)
         {
@@ -272,8 +270,7 @@ namespace MWRender
 
     void Objects::setOcclusionCuller(SceneUtil::OcclusionCuller* culler, float occluderMinRadius,
         float occluderMaxRadius, float occluderShrinkFactor, int occluderMeshResolution, int occluderMaxMeshResolution,
-        float occluderInsideThreshold, float occluderMaxDistance, bool enableStaticOccluders,
-        unsigned int maxTriangles)
+        float occluderInsideThreshold, float occluderMaxDistance, bool enableStaticOccluders, unsigned int maxTriangles)
     {
         mOcclusionCuller = culler;
         mOccluderMinRadius = occluderMinRadius;
@@ -286,5 +283,4 @@ namespace MWRender
         mEnableStaticOccluders = enableStaticOccluders;
         mMaxTriangles = maxTriangles;
     }
-
 }

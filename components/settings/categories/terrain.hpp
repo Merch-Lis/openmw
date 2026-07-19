@@ -39,8 +39,8 @@ namespace Settings
             "object paging min size cost multiplier", makeMaxStrictSanitizerFloat(0) };
         SettingValue<float> mObjectPagingLandmarkSize{ mIndex, "Terrain", "object paging landmark size",
             makeMaxSanitizerFloat(0) };
-        SettingValue<float> mObjectPagingLandmarkRangeFactor{ mIndex, "Terrain",
-            "object paging landmark range factor", makeMaxSanitizerFloat(1) };
+        SettingValue<float> mObjectPagingLandmarkRangeFactor{ mIndex, "Terrain", "object paging landmark range factor",
+            makeMaxSanitizerFloat(1) };
         SettingValue<float> mObjectPagingSimplifyStrength{ mIndex, "Terrain", "object paging simplify strength",
             makeMaxSanitizerFloat(0) };
         SettingValue<float> mObjectPagingPopDistanceFloor{ mIndex, "Terrain", "object paging pop distance floor",
@@ -66,8 +66,7 @@ namespace Settings
             makeMaxSanitizerFloat(0) };
         SettingValue<int> mDistantStaticsNearRingCells{ mIndex, "Terrain", "distant statics near ring cells" };
         SettingValue<int> mDistantStaticsFarRingCells{ mIndex, "Terrain", "distant statics far ring cells" };
-        SettingValue<int> mDistantStaticsVeryFarRingCells{ mIndex, "Terrain",
-            "distant statics very far ring cells" };
+        SettingValue<int> mDistantStaticsVeryFarRingCells{ mIndex, "Terrain", "distant statics very far ring cells" };
     };
 }
 
