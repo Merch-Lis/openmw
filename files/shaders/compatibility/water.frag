@@ -237,7 +237,16 @@ void main(void)
         // z-squashed (water.cpp refraction clip + scale), and unfogged it
         // reads as a displaced copy of the seafloor on the surface.
         float uwDist = length(position.xyz - cameraPos.xyz);
-        refraction = mix(gl_Fog.color.rgb, clamp(refraction * 1.5, 0.0, 1.0), exp(-uwDist / MGE_UW_REFRACTION_FADE));
+        float uwFade = exp(-uwDist / MGE_UW_REFRACTION_FADE);
+        refraction = mix(gl_Fog.color.rgb, clamp(refraction * 1.5, 0.0, 1.0), uwFade);
+        // The reflection RTT holds the mirrored underwater scene rendered
+        // crisp (no water-path fog), while MGE's equivalent is palette-
+        // fogged over a horizon-colour clear - shown raw it forms a hard
+        // band against the fogged refraction at the internal-reflection
+        // angle. Converge the mirror to the fogged refraction with the
+        // same distance fade: near-field keeps the true mirror, the
+        // grazing band becomes continuous haze.
+        reflection = mix(refraction, reflection, uwFade);
     }
     else
     {
