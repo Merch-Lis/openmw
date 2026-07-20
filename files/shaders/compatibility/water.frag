@@ -38,6 +38,11 @@ const float REFR_BUMP = 0.07;                      // refraction distortion amou
 const float MGE_UW_FRESNEL_BIAS = 1.12;
 const float MGE_UW_FRESNEL_SLOPE = 0.65;
 const float MGE_UW_FRESNEL_POWER = 8.0;
+const float MGE_UW_REFLECTION_SCALE = 1.0;   // from-below mirror intensity (1 = MGE). Was
+                                             // lowered to 0.6 while the reflection RTT was
+                                             // unfogged from below; with the RTT now murk-
+                                             // fogged over the mirrored path, MGE's own
+                                             // fresnel strength reads correctly again.
 
 #if @sunlightScattering
 const float SCATTER_AMOUNT = 0.3;                  // amount of sunlight scattering
@@ -173,6 +178,7 @@ void main(void)
         // below the surface mostly shows the refracted above-water world.
         float fcos = clamp(dot(viewDir, normal), 0.0, 1.0);
         fresnel = pow(clamp(MGE_UW_FRESNEL_BIAS - MGE_UW_FRESNEL_SLOPE * fcos, 0.0, 1.0), MGE_UW_FRESNEL_POWER);
+        fresnel *= MGE_UW_REFLECTION_SCALE;   // dial down the from-below mirror
     }
 
     vec2 screenCoordsOffset = normal.xy * REFL_BUMP;
@@ -187,17 +193,14 @@ void main(void)
     // reflection
     vec3 reflection = sampleReflectionMap(screenCoords + screenCoordsOffset).rgb;
 
-    // From below, fade the reflection to the underwater fog colour with the
-    // SAME exponential law as the refraction (below) and the below-water fog
-    // (mge_fog.glsl). The reflection RTT is the mirrored ABOVE-water scene
-    // fogged to the bright horizon, and it was the one from-below term never
-    // faded with distance - so at grazing angles (high fresnel) it stayed a
-    // bright mirror band that should physically have dissolved into murk.
-    // Beyond the ~48.6deg critical angle the surface mirrors the underwater
-    // hemisphere (murk), so fading to gl_Fog.color is the right stand-in.
-    if (cameraPos.z < 0.0)
-        reflection = mix(gl_Fog.color.rgb, reflection,
-            exp(-length(position.xyz - cameraPos.xyz) / mgeUwFogDist()));
+    // From below, no extra reflection fade is needed here: the reflection
+    // RTT itself is fogged with the viewer's underwater murk (mge_fog.glsl
+    // follows the MAIN viewer's medium via the viewerUnderwater uniform),
+    // and the mirrored-camera distance equals the full camera->surface->
+    // object light path - so the RTT already hides submerged objects in the
+    // reflection exactly as the murk hides them from the viewer. Fading
+    // again here by the camera->surface leg double-counts that path and
+    // blanks even near reflections.
 
     // MGE XE Mod Water.fx depthBaseColor: deep-water body colour is
     // WEATHER-LIT (sun + 2*sky + fog terms), not a fixed dark constant —
@@ -343,6 +346,12 @@ void main(void)
 #else
     gl_FragData[0] = applyFogAtDist(gl_FragData[0], radialDepth, linearDepth, far);
 #endif
+
+    // Underwater source probe (mge_fog.glsl, normally off): the water
+    // surface plane seen from below tints RED. Applied after fog so the
+    // region reads red wherever the surface plane is what's on screen.
+    if (cameraPos.z < 0.0 && mgeUwProbe())
+        gl_FragData[0].rgb = mix(gl_FragData[0].rgb, vec3(1.0, 0.0, 0.0), 0.45);
 
 #if !@disableNormals
     gl_FragData[1].rgb = normalize(gl_NormalMatrix * normal) * 0.5 + 0.5;

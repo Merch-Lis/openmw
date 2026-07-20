@@ -874,6 +874,9 @@ namespace MWRender
         mStateUpdater->setFogStart(fogStart);
         mStateUpdater->setFogEnd(fogEnd);
         setFogColor(fogColor);
+        mSharedUniformStateUpdater->setViewerUnderwater(isUnderwater);
+        mWater->setRefractionViewerFog(
+            isUnderwater, mFog->getFogStart(false), mFog->getFogEnd(false), mFog->getFogColor(false));
 
         auto world = MWBase::Environment::get().getWorld();
         const auto& stateUpdater = mPostProcessor->getStateUpdater();

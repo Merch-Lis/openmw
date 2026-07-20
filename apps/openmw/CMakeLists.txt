@@ -160,6 +160,14 @@ if(BUILD_OPENMW)
     if (CMAKE_CXX_COMPILER_ID STREQUAL Clang)
         set_target_properties(openmw PROPERTIES ENABLE_EXPORTS ON)
     endif()
+
+    # MSVC: renderingmanager.obj's debug info trips LNK1103 ("debugging
+    # information corrupt") on Release links; the shipping build needs no
+    # PDB anyway. Set here (not hand-edited in the generated vcxproj) so
+    # CMake regeneration keeps it.
+    if (MSVC)
+        set_target_properties(openmw PROPERTIES LINK_FLAGS_RELEASE "/DEBUG:NONE")
+    endif()
 endif()
 
 # Sound stuff - here so CMake doesn't stupidly recompile EVERYTHING

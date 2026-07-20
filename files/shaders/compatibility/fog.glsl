@@ -69,6 +69,16 @@ vec4 applyFogAtDirWorld(vec4 color, float dist, vec3 dirWorld, float far)
 #if @skyBlending
     float fadeValue = clamp((far - dist) / (far - skyBlendingStart), 0.0, 1.0);
     fadeValue *= fadeValue;
+#ifdef LIB_LIGHTING_UTIL
+    // From below the water surface the sky RTT still holds the ABOVE-water
+    // sky gradient, so blending toward it re-lights far geometry through
+    // the underwater murk: the distant-statics class/residency gates (fixed
+    // world radii) then read as hard-edged horizontal "clear slices" over
+    // the fog. Skip the blend underwater - fragments keep the murk colour
+    // the fog model just gave them. Above water the blend is unchanged.
+    if (!mgeCamAboveWater() || isRefraction)
+        fadeValue = 1.0;
+#endif
 #ifdef ADDITIVE_BLENDING
     color.xyz *= fadeValue;
 #else
@@ -117,6 +127,16 @@ vec4 applyFogAtDist(vec4 color, float euclideanDist, float linearDist, float far
 #if @skyBlending
     float fadeValue = clamp((far - dist) / (far - skyBlendingStart), 0.0, 1.0);
     fadeValue *= fadeValue;
+#ifdef LIB_LIGHTING_UTIL
+    // From below the water surface the sky RTT still holds the ABOVE-water
+    // sky gradient, so blending toward it re-lights far geometry through
+    // the underwater murk: the distant-statics class/residency gates (fixed
+    // world radii) then read as hard-edged horizontal "clear slices" over
+    // the fog. Skip the blend underwater - fragments keep the murk colour
+    // the fog model just gave them. Above water the blend is unchanged.
+    if (!mgeCamAboveWater() || isRefraction)
+        fadeValue = 1.0;
+#endif
 #ifdef ADDITIVE_BLENDING
     color.xyz *= fadeValue;
 #else
@@ -159,6 +179,16 @@ vec4 applyFogAtPos(vec4 color, vec3 pos, float far)
 #if @skyBlending
     float fadeValue = clamp((far - dist) / (far - skyBlendingStart), 0.0, 1.0);
     fadeValue *= fadeValue;
+#ifdef LIB_LIGHTING_UTIL
+    // From below the water surface the sky RTT still holds the ABOVE-water
+    // sky gradient, so blending toward it re-lights far geometry through
+    // the underwater murk: the distant-statics class/residency gates (fixed
+    // world radii) then read as hard-edged horizontal "clear slices" over
+    // the fog. Skip the blend underwater - fragments keep the murk colour
+    // the fog model just gave them. Above water the blend is unchanged.
+    if (!mgeCamAboveWater() || isRefraction)
+        fadeValue = 1.0;
+#endif
 #ifdef ADDITIVE_BLENDING
     color.xyz *= fadeValue;
 #else

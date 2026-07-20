@@ -153,5 +153,10 @@ void main()
         return;
     }
 
+    // Underwater source probe (mge_fog.glsl, normally off): everything the
+    // sky program draws while the camera is submerged tints GREEN.
+    if (mgeUwProbe())
+        color.xyz = mix(color.xyz, vec3(0.0, 1.0, 0.0), 0.6);
+
     gl_FragData[0] = color;
 }

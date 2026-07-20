@@ -243,6 +243,13 @@ namespace MWRender
         {
             setDepthBufferInternalFormat(GL_DEPTH24_STENCIL8);
             mClipCullNode = new ClipCullNode;
+            // Created here, not in setDefaults(): setViewerFog is driven per
+            // frame by RenderingManager::update, which can run before the
+            // RTT's lazy setDefaults has ever been called.
+            mFog = new osg::Fog;
+            mFog->setDataVariance(osg::Object::DYNAMIC);
+            mFog->setStart(10000000);
+            mFog->setEnd(10000000);
         }
 
         void setDefaults(osg::Camera* camera) override
@@ -253,14 +260,16 @@ namespace MWRender
             camera->addCullCallback(new InheritViewPointCallback);
             camera->setComputeNearFarMode(osg::CullSettings::DO_NOT_COMPUTE_NEAR_FAR);
 
-            // No need for fog here, we are already applying fog on the water surface itself as well as underwater fog
-            // assign large value to effectively turn off fog
-            // shaders don't respect glDisable(GL_FOG)
-            osg::ref_ptr<osg::Fog> fog(new osg::Fog);
-            fog->setStart(10000000);
-            fog->setEnd(10000000);
+            // Viewer above water: no need for fog here, we are already applying fog on the water surface itself as
+            // well as underwater fog - fog stays effectively off via the large ranges set in the constructor
+            // (shaders don't respect glDisable(GL_FOG)). Viewer below water: the RTT shows the ABOVE-water world,
+            // and setViewerFog swaps in the real above-water fog state so distant content keeps its atmospheric
+            // haze; the shaders route this pass to the above-water fog model via the isRefraction uniform.
             camera->getOrCreateStateSet()->setAttributeAndModes(
-                fog, osg::StateAttribute::OFF | osg::StateAttribute::OVERRIDE);
+                mFog, osg::StateAttribute::OFF | osg::StateAttribute::OVERRIDE);
+
+            // Inform the shader that we're in the refraction pass
+            camera->getOrCreateStateSet()->addUniform(new osg::Uniform("isRefraction", true));
 
             camera->addChild(mClipCullNode);
             camera->setNodeMask(Mask_RenderToTexture);
@@ -301,9 +310,27 @@ namespace MWRender
                 mNodeMask = Refraction::sDefaultCullMask & ~sToggleWorldMask;
         }
 
+        void setViewerFog(bool viewerUnderwater, float start, float end, const osg::Vec4f& color)
+        {
+            if (!mFog)
+                return;
+            if (viewerUnderwater)
+            {
+                mFog->setStart(start);
+                mFog->setEnd(end);
+                mFog->setColor(color);
+            }
+            else
+            {
+                mFog->setStart(10000000);
+                mFog->setEnd(10000000);
+            }
+        }
+
     private:
         osg::ref_ptr<ClipCullNode> mClipCullNode;
         osg::ref_ptr<osg::Node> mScene;
+        osg::ref_ptr<osg::Fog> mFog;
         osg::Matrix mViewMatrix{ osg::Matrix::identity() };
 
         unsigned int mNodeMask;
@@ -769,6 +796,12 @@ namespace MWRender
         }
         if (mInterior != wasInterior && mReflection)
             mReflection->setInterior(mInterior);
+    }
+
+    void Water::setRefractionViewerFog(bool viewerUnderwater, float start, float end, const osg::Vec4f& color)
+    {
+        if (mRefraction)
+            mRefraction->setViewerFog(viewerUnderwater, start, end, color);
     }
 
     void Water::setHeight(const float height)

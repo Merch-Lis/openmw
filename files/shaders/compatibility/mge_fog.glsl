@@ -210,26 +210,52 @@ float mgeSkyFogH(float dirZ)
 // false everywhere else.
 uniform bool isReflection;
 
-// True when the EFFECTIVE viewer is above sea level. The water-reflection
-// RTT renders with a camera MIRRORED below the water plane; naively reading
-// camera z routed the whole reflection pass into the underwater linear-fog
-// branch (dark palette-fogged reflections; probe-confirmed: reflection
-// sample luminance ~0). A determinant-of-view-matrix test failed under
-// OSG's RELATIVE_RF matrix plumbing - use the engine's own isReflection
-// uniform instead.
+// True when the MAIN viewer is underwater; set per frame on the root
+// stateset by the engine (SharedUniformStateUpdater, from the same
+// isUnderwater state that switches gl_Fog). Authoritative for every pass:
+// earlier matrix-sniffing detection (mirrored view matrix / camera z)
+// misfired per-program under OSG's matrix plumbing.
+uniform bool viewerUnderwater;
+
+// Set true on the water-refraction camera's StateSet by the engine
+// (water.cpp); GLSL/root default false everywhere else.
+uniform bool isRefraction;
+
+// True when fog should use the above-water model. Follows the MAIN viewer
+// for the reflection RTT too: the water-reflection camera is mirrored
+// through the surface, so its distances equal the full camera->surface->
+// object light path - fogging the reflection with the viewer's own medium
+// makes submerged objects vanish in the reflection exactly as the murk
+// hides them from the viewer (from below) while keeping above-water
+// reflections on the atmospheric model (from above). The refraction RTT is
+// the exception: from below it renders the ABOVE-water world (the engine
+// feeds it the above-water gl_Fog state), so it stays on the above-water
+// model - distant trees keep their haze and emerging is seamless. Other
+// fog-disabled utility RTTs (local map, previews) early-out on the
+// gl_Fog.start sentinel before this matters.
 bool mgeCamAboveWater()
 {
-    // Two detection channels, because neither alone reaches every program:
-    // isReflection (engine uniform) binds in the scene shaders but
-    // provably NOT in the sky program's reflection rendering (probe 3:
-    // magenta branch never fired there), while the mirrored view matrix
-    // provably DOES reach the sky program (its camera z went negative).
-    if (isReflection)
-        return true; // reflections only render for an above-water viewer
-    if (osg_ViewMatrixInverse[3].z >= -1.0)
-        return true;
-    mat3 vm = mat3(osg_ViewMatrixInverse);
-    return dot(vm[0], cross(vm[1], vm[2])) < 0.0; // mirrored handedness
+    return !viewerUnderwater || isRefraction;
+}
+
+// ==== UNDERWATER SOURCE PROBE (diagnostic, normally 0) ====
+// False-colours the from-below view by SOURCE RENDERER so one screenshot
+// attributes any banding to the pass that draws it:
+//   BLUE  tint = scene geometry fogged by the underwater fog branch
+//   GREEN tint = the sky dome drawn directly (sky.frag)
+//   RED   tint = the water surface plane (water.frag from below)
+// Reflection RTT content is deliberately untinted (isReflection forces the
+// above-water path), so untinted bright areas INSIDE the red surface
+// region = reflection/refraction injection; untinted banding across all
+// regions = the post chain (bisect with the F2 live toggles).
+#define MGE_UW_SOURCE_PROBE 0
+bool mgeUwProbe()
+{
+#if MGE_UW_SOURCE_PROBE
+    return !mgeCamAboveWater();
+#else
+    return false;
+#endif
 }
 
 // Underwater exponential-murk fade distance (transmittance 1/e here). Shared
@@ -345,7 +371,10 @@ vec4 mgeFogColourWorld(float dist, vec3 dirWorld, float far, vec3 skyCol, bool u
         // water.frag all converge to gl_Fog.color on THIS same law, so the
         // from-below view is a single medium instead of stacked bands.
         float T = exp(-dist / mgeUwFogDist());
-        return vec4((1.0 - T) * gl_Fog.color.xyz, T);
+        vec3 uwFogCol = gl_Fog.color.xyz;
+        if (mgeUwProbe())
+            uwFogCol = mix(uwFogCol, vec3(0.0, 0.0, 1.0), 0.6); // probe: murk = BLUE
+        return vec4((1.0 - T) * uwFogCol, T);
     }
 
     // Engine-side range setup (adjustFog), in shader because OpenMW's fog
@@ -517,7 +546,13 @@ vec3 mgeFogColourSky(vec3 dirWorld, vec3 zenithCol, vec3 skyCol)
     float h = mgeSkyFogH(dirWorld.z);
     vec3 base = mix(gl_Fog.color.xyz, zenithCol, h);
     float nice = mgeGetNiceWeather();
-    if (nice > 0.001 && mgeCamAboveWater())
+    // Fog-disabled cameras (the underwater refraction RTT, local map,
+    // previews) render the ABOVE-water world by definition, so they always
+    // paint the above-water sky: without this, a submerged viewer's
+    // refraction RTT skips the scatter and blends its horizon toward the
+    // global gl_Fog.color - the underwater murk - drawing a dark band
+    // across the above-water sky seen through the surface.
+    if (nice > 0.001 && (mgeCamAboveWater() || gl_Fog.start > 1000000.0))
         return mix(base, mgeScatter(dirWorld, 1.0, skyCol), nice);
     return base;
 }

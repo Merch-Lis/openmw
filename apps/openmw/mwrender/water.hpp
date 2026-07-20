@@ -6,6 +6,7 @@
 
 #include <osg/Vec3d>
 #include <osg/Vec3f>
+#include <osg/Vec4f>
 #include <osg/ref_ptr>
 
 #include <components/settings/settings.hpp>
@@ -114,6 +115,10 @@ namespace MWRender
         void changeCell(const MWWorld::CellStore* store);
         void setHeight(const float height);
         void setRainIntensity(const float rainIntensity);
+
+        /// Feed the refraction RTT the above-water fog state while the viewer is submerged (it renders the
+        /// above-water world), or disable its fog when the viewer is above water (stock behaviour).
+        void setRefractionViewerFog(bool viewerUnderwater, float start, float end, const osg::Vec4f& color);
 
         void update(float dt, bool paused);
 
