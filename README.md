@@ -12,18 +12,13 @@ Install
 
 Download the package from [Releases](https://github.com/Merch-Lis/openmw/releases) and follow the README.txt inside. It overlays an existing OpenMW 0.51.0 install; your data files and configuration stay untouched.
 
-Where the changes live
+Where the changes are located
 ------
 
 - files/shaders/compatibility/mge_fog.glsl: the MGE XE fog and scattering model, driven by weather, sun and time-of-day uniforms fed from the engine.
 - apps/openmw/mwrender/objectpaging.cpp and apps/distantlandtool: distant statics in three size classes with residency rings, generated per load order by the [OpenMW Graphics Extender](https://github.com/Merch-Lis/openmw-graphics-extender).
 - files/shaders/compatibility/water.frag, sky.frag, fog.glsl: water, sky and fog integration, including the from-below underwater path.
 - The post-processing shaders are not part of the engine tree; they ship as a data folder in the release package.
-
-Building (Windows/MSVC)
-------
-
-Standard OpenMW build process. One quirk: renderingmanager.obj's debug info trips LNK1103 on Release links, so the fork pins /DEBUG:NONE for the Release link in apps/openmw/CMakeLists.txt.
 
 Credits
 ------
