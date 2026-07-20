@@ -66,6 +66,12 @@ uniform float mgeScatterUniformsOn;
 // and formula era together. 1 = 2020/0.11-era, 0 = live/0.18-style.
 #define MGE_SCATTER_ERA_2020 1
 
+// Height-aware scene fog in dense weathers (summits shed fog, valleys
+// gain it). 0 = plain distance fog. The same switch exists in
+// STEP_SSAO_HQ.omwfx and MGG_Bloom_Soft.omwfx, which mirror the fog
+// curve; keep all three in the same state.
+#define MGE_HEIGHT_FOG 1
+
 #if MGE_SCATTER_ERA_2020
 // newskycol = 0.38*sky + fixed blue; the fixed term keeps clear haze blue.
 const vec3 mgeSkyBase           = vec3(0.23, 0.39, 0.68);
@@ -395,6 +401,7 @@ vec4 mgeFogColourWorld(float dist, vec3 dirWorld, float far, vec3 skyCol, bool u
     // mwse_fog_volumetric.omwfx, currently passthrough).
     float wDense = dv.wDense;
     float distEff = dist;
+#if MGE_HEIGHT_FOG
     if (wDense > 0.001)
     {
         // Layer model: the fog-layer density falls off with altitude as
@@ -423,6 +430,7 @@ vec4 mgeFogColourWorld(float dist, vec3 dirWorld, float far, vec3 skyCol, bool u
         F = clamp(F, mix(0.25, 0.08, steep), 2.5);
         distEff = dist * mix(1.0, F, wLayer);
     }
+#endif
     // ===== end height-aware scene fog (floor applied after the curve below) =====
 
     float x = (distEff - fogExpStart) / fogExpDivisor;
