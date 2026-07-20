@@ -30,7 +30,7 @@ const float WAVE_SCALE = 75.0;                     // overall wave scale
 const float BUMP = 0.5;                            // overall water surface bumpiness
 const float BUMP_RAIN = 2.5;
 const float REFL_BUMP = 0.07;                      // reflection distortion amount
-                                                   // (stock 0.10; reduced - narrows the pale
+                                                   // (stock 0.10; the lower value narrows the pale
                                                    // contact halo where island shores meet their reflection)
 const float REFR_BUMP = 0.07;                      // refraction distortion amount
 // XE Mod Water.fx UnderwaterPS verbatim: from-below fresnel curve and the
@@ -38,11 +38,11 @@ const float REFR_BUMP = 0.07;                      // refraction distortion amou
 const float MGE_UW_FRESNEL_BIAS = 1.12;
 const float MGE_UW_FRESNEL_SLOPE = 0.65;
 const float MGE_UW_FRESNEL_POWER = 8.0;
-const float MGE_UW_REFLECTION_SCALE = 1.0;   // from-below mirror intensity (1 = MGE). Was
-                                             // lowered to 0.6 while the reflection RTT was
-                                             // unfogged from below; with the RTT now murk-
-                                             // fogged over the mirrored path, MGE's own
-                                             // fresnel strength reads correctly again.
+const float MGE_UW_REFLECTION_SCALE = 1.0;   // from-below mirror intensity (1 = MGE).
+                                             // With the reflection RTT murk-fogged over
+                                             // the mirrored path, MGE's own fresnel
+                                             // strength reads correctly at 1.0; only
+                                             // reduce this if that fogging is removed.
 
 #if @sunlightScattering
 const float SCATTER_AMOUNT = 0.3;                  // amount of sunlight scattering
@@ -110,7 +110,7 @@ void main(void)
 
     float shadow = unshadowedLightRatio(linearDepth);
     // MGE XE Mod Shadow.fx: shadow strength scales with sun visibility
-    // (x *= 0.25 + 0.75*sunVis) — cloud cover fades shadows instead of
+    // (x *= 0.25 + 0.75*sunVis), so cloud cover fades shadows instead of
     // leaving full-strength shadows under an overcast sky. sunVis rides
     // light 0's specular alpha (RenderingManager::setSunColour).
     shadow = 1.0 - (1.0 - shadow) * (0.25 + 0.75 * clamp(lcalcSpecular(0).a, 0.0, 1.0));
@@ -161,11 +161,11 @@ void main(void)
     float fresnel;
     if (cameraPos.z > 0.0)
     {
-        // MGE XE Mod Water.fx fresnel: 0.02 + (0.9988 - slope*cos)^16 -
-        // noticeably more reflective at mid angles than the physical
+        // MGE XE Mod Water.fx fresnel: 0.02 + (0.9988 - slope*cos)^16.
+        // Noticeably more reflective at mid angles than the physical
         // dielectric term, so open water carries more sky (the MGE look).
-        // slope: 0.28 = MGE verbatim; raised slightly - trims mid-angle
-        // reflectivity ~20-25% while keeping grazing/far-water brightness.
+        // Slope 0.28 is MGE verbatim; 0.34 trims mid-angle reflectivity
+        // ~20-25% while keeping grazing/far-water brightness.
         const float mgeFresnelSlope = 0.34;
         float fcos = clamp(dot(-viewDir, normal), 0.0, 1.0);
         fresnel = 0.02 + pow(clamp(0.9988 - mgeFresnelSlope * fcos, 0.0, 1.0), 16.0);
@@ -178,7 +178,7 @@ void main(void)
         // below the surface mostly shows the refracted above-water world.
         float fcos = clamp(dot(viewDir, normal), 0.0, 1.0);
         fresnel = pow(clamp(MGE_UW_FRESNEL_BIAS - MGE_UW_FRESNEL_SLOPE * fcos, 0.0, 1.0), MGE_UW_FRESNEL_POWER);
-        fresnel *= MGE_UW_REFLECTION_SCALE;   // dial down the from-below mirror
+        fresnel *= MGE_UW_REFLECTION_SCALE;   // from-below mirror intensity scale
     }
 
     vec2 screenCoordsOffset = normal.xy * REFL_BUMP;
@@ -195,17 +195,17 @@ void main(void)
 
     // From below, no extra reflection fade is needed here: the reflection
     // RTT itself is fogged with the viewer's underwater murk (mge_fog.glsl
-    // follows the MAIN viewer's medium via the viewerUnderwater uniform),
+    // follows the main viewer's medium via the viewerUnderwater uniform),
     // and the mirrored-camera distance equals the full camera->surface->
-    // object light path - so the RTT already hides submerged objects in the
-    // reflection exactly as the murk hides them from the viewer. Fading
-    // again here by the camera->surface leg double-counts that path and
-    // blanks even near reflections.
+    // object light path, so the RTT already hides submerged objects in the
+    // reflection to the correct degree. Fading again here by the
+    // camera->surface leg double-counts that path and blanks even near
+    // reflections.
 
     // MGE XE Mod Water.fx depthBaseColor: deep-water body colour is
-    // WEATHER-LIT (sun + 2*sky + fog terms), not a fixed dark constant —
-    // under a bright sky deep water stays mid-luminance instead of going
-    // black (stock: WATER_COLOR * sunFade, ~3x darker on a hazy day).
+    // weather-lit (sun + 2*sky + fog terms), not a fixed dark constant,
+    // so under a bright sky deep water stays mid-luminance instead of
+    // going black (stock: WATER_COLOR * sunFade, ~3x darker on a hazy day).
     vec3 waterColor = lcalcDiffuse(0).xyz * vec3(0.03, 0.04, 0.05)
         + (2.0 * mgeSampleSkyCol() + gl_Fog.color.xyz) * vec3(0.075, 0.08, 0.085);
 
@@ -247,7 +247,7 @@ void main(void)
     {
         // MGE XE UnderwaterPS: from below, refraction fades to the fog
         // colour within ~1500u (exp(-dist/500)). Necessary, not cosmetic:
-        // the from-below refraction map is the UNDERWATER scene re-rendered
+        // the from-below refraction map is the underwater scene re-rendered
         // z-squashed (water.cpp refraction clip + scale), and unfogged it
         // reads as a displaced copy of the seafloor on the surface.
         float uwDist = length(position.xyz - cameraPos.xyz);
@@ -295,15 +295,15 @@ void main(void)
     shoreOffset *= fuzzFactor;
     shoreOffset = clamp(mix(shoreOffset, 1.0, clamp(linearDepth / WOBBLY_SHORE_FADE_DISTANCE, 0.0, 1.0)), 0.0, 1.0);
     // Fresnel floor: at grazing angles the surface must go reflective, never
-    // raw refraction - stock's viewFactor inverts this, making shallow bays
+    // raw refraction. Stock's viewFactor inverts this, making shallow bays
     // read as dry seabed from low camera angles.
     shoreOffset = max(shoreOffset, clamp(fresnel * 3.0, 0.0, 1.0));
     // No-geometry guard: near shore silhouettes the distorted refraction
-    // sample can land BEYOND all submerged geometry - the refraction RTT
-    // there holds its empty background (bright scatter sky under the MGE
-    // fog), which punches white wobble-edged patches into dark water.
+    // sample can land beyond all submerged geometry, where the refraction
+    // RTT holds its empty background (bright scatter sky under the MGE
+    // fog), which shows as bright wobble-edged patches in dark water.
     // If the distorted sample hit (near) the far plane, there is no seabed
-    // to show - suppress the raw-refraction path entirely.
+    // to show; suppress the raw-refraction path entirely.
     if (depthSampleDistorted > far * 0.9)
         shoreOffset = 1.0;
     gl_FragData[0].rgb = mix(rawRefraction, gl_FragData[0].rgb, shoreOffset);
@@ -312,8 +312,8 @@ void main(void)
 // ==== WATER PROBE (diagnostic, normally 0) ====
 // Mode 1: false-colour R = fresnel, G = reflection luminance,
 //         B = refraction luminance.
-// Mode 2: raw mirror - display the reflection RTT sample directly (no
-//         distortion offset), to see the RTT's actual CONTENT.
+// Mode 2: raw mirror: display the reflection RTT sample directly (no
+//         distortion offset) to inspect the RTT's actual content.
 #define MGE_WATER_PROBE 0
 #if MGE_WATER_PROBE == 1
     gl_FragData[0] = vec4(fresnel,
@@ -348,7 +348,7 @@ void main(void)
 #endif
 
     // Underwater source probe (mge_fog.glsl, normally off): the water
-    // surface plane seen from below tints RED. Applied after fog so the
+    // surface plane seen from below tints red. Applied after fog so the
     // region reads red wherever the surface plane is what's on screen.
     if (cameraPos.z < 0.0 && mgeUwProbe())
         gl_FragData[0].rgb = mix(gl_FragData[0].rgb, vec3(1.0, 0.0, 0.0), 0.45);

@@ -5,7 +5,7 @@ uniform float skyBlendingStart;
 #endif
 
 #ifdef LIB_LIGHTING_UTIL
-// MGE XE fog & scattering port — see mge_fog.glsl for the model + provenance.
+// MGE XE fog & scattering port; see mge_fog.glsl for the model + provenance.
 #include "mge_fog.glsl"
 
 // True weather sky colour: sample the sky-blending RTT high on screen
@@ -22,21 +22,21 @@ vec3 mgeSampleSkyCol()
 }
 
 // Per-pixel sky sample behind this fragment (the sky-blending RTT holds
-// the REAL rendered sky incl. the cloud layer). a=0 when unavailable or in
-// a reflection pass (the RTT belongs to the main camera; reflection
+// the actual rendered sky incl. the cloud layer). a=0 when unavailable or
+// in a reflection pass (the RTT belongs to the main camera; reflection
 // fragcoords would sample wrong positions).
 vec4 mgeSkyBehind()
 {
 #if @skyBlending
     if (!isReflection)
     {
-        // WIDE HORIZONTAL AVERAGE, not the raw pixel: any per-pixel
-        // image is camera-locked - even with cloud
-        // shapes weighted out, its brightness unevenness showed as a
-        // static screen-space fog mask on mid-saturated geometry.
-        // Averaging along the same screen row keeps the sky's true
-        // brightness AT THAT ELEVATION (clouds included - what fixes the
-        // cutouts) while flattening the pattern to a smooth gradient.
+        // Wide horizontal average, not the raw pixel: any per-pixel image
+        // is camera-locked, so its brightness unevenness reads as a static
+        // screen-space fog mask on mid-saturated geometry, even with cloud
+        // shapes weighted out. Averaging along the same screen row keeps
+        // the sky's true brightness at that elevation (clouds included,
+        // which is what fixes the cutouts) while flattening the pattern to
+        // a smooth gradient.
         vec2 uv = gl_FragCoord.xy / screenRes;
         vec3 acc = vec3(0.0);
         for (int i = -3; i <= 3; ++i)
@@ -47,7 +47,7 @@ vec4 mgeSkyBehind()
     return vec4(0.0);
 }
 
-// World-direction entry point (water: MGE fogColourWater analogue —
+// World-direction entry point (water: MGE fogColourWater analogue;
 // pure exp at all ranges, no near-linear switch).
 vec4 applyFogAtDirWorld(vec4 color, float dist, vec3 dirWorld, float far)
 {
@@ -59,22 +59,21 @@ vec4 applyFogAtDirWorld(vec4 color, float dist, vec3 dirWorld, float far)
 #endif
 
     // Sky blending kept on the MGE path deliberately. MGE XE itself has
-    // no such pass (distantland
-    // .cpp renders statics to full DrawDist with fogApply only), but the
-    // mix pulls far geometry toward the RENDERED sky at the fragment's own
-    // screen position - possibly including the cloud layer - and whether
-    // that helps or hurts the fog-weather far-band cutout has never been
-    // A/B tested. The [Fog] 'sky blending' setting toggles it live: OFF =
-    // pure MGE behaviour, ON = stock blend. Test before deciding.
+    // no such pass (distantland.cpp renders statics to full DrawDist with
+    // fogApply only), but the mix pulls far geometry toward the rendered
+    // sky at the fragment's own screen position, possibly including the
+    // cloud layer; whether that helps or hurts the fog-weather far-band
+    // cutout is untested. The [Fog] 'sky blending' setting toggles it
+    // live: off is pure MGE behaviour, on is the stock blend.
 #if @skyBlending
     float fadeValue = clamp((far - dist) / (far - skyBlendingStart), 0.0, 1.0);
     fadeValue *= fadeValue;
 #ifdef LIB_LIGHTING_UTIL
-    // From below the water surface the sky RTT still holds the ABOVE-water
+    // From below the water surface the sky RTT still holds the above-water
     // sky gradient, so blending toward it re-lights far geometry through
     // the underwater murk: the distant-statics class/residency gates (fixed
     // world radii) then read as hard-edged horizontal "clear slices" over
-    // the fog. Skip the blend underwater - fragments keep the murk colour
+    // the fog. Skip the blend underwater; fragments keep the murk colour
     // the fog model just gave them. Above water the blend is unchanged.
     if (!mgeCamAboveWater() || isRefraction)
         fadeValue = 1.0;
@@ -128,11 +127,11 @@ vec4 applyFogAtDist(vec4 color, float euclideanDist, float linearDist, float far
     float fadeValue = clamp((far - dist) / (far - skyBlendingStart), 0.0, 1.0);
     fadeValue *= fadeValue;
 #ifdef LIB_LIGHTING_UTIL
-    // From below the water surface the sky RTT still holds the ABOVE-water
+    // From below the water surface the sky RTT still holds the above-water
     // sky gradient, so blending toward it re-lights far geometry through
     // the underwater murk: the distant-statics class/residency gates (fixed
     // world radii) then read as hard-edged horizontal "clear slices" over
-    // the fog. Skip the blend underwater - fragments keep the murk colour
+    // the fog. Skip the blend underwater; fragments keep the murk colour
     // the fog model just gave them. Above water the blend is unchanged.
     if (!mgeCamAboveWater() || isRefraction)
         fadeValue = 1.0;
@@ -180,11 +179,11 @@ vec4 applyFogAtPos(vec4 color, vec3 pos, float far)
     float fadeValue = clamp((far - dist) / (far - skyBlendingStart), 0.0, 1.0);
     fadeValue *= fadeValue;
 #ifdef LIB_LIGHTING_UTIL
-    // From below the water surface the sky RTT still holds the ABOVE-water
+    // From below the water surface the sky RTT still holds the above-water
     // sky gradient, so blending toward it re-lights far geometry through
     // the underwater murk: the distant-statics class/residency gates (fixed
     // world radii) then read as hard-edged horizontal "clear slices" over
-    // the fog. Skip the blend underwater - fragments keep the murk colour
+    // the fog. Skip the blend underwater; fragments keep the murk colour
     // the fog model just gave them. Above water the blend is unchanged.
     if (!mgeCamAboveWater() || isRefraction)
         fadeValue = 1.0;

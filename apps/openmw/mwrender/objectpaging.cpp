@@ -152,15 +152,16 @@ namespace MWRender
 
     namespace
     {
-        // ==== MGE-style distant-land precompute: chunk disk cache (patch v6) ====
+        // ==== MGE-style distant-land precompute: chunk disk cache ====
         // Serializes merged paged chunks (.osgb) so later sessions stream
         // pre-built geometry instead of re-merging. Enabled by setting
         // [Terrain] "object paging disk cache dir" to a writable directory.
 
         // TextureType wrapper: the ShaderVisitor needs this attribute to
         // assign texture semantics; without a wrapper osgDB drops it.
-        // (Deliberately NOT using SceneUtil::registerSerializers() - its
-        // osg::Geometry stub discards vertex data; built for debug dumps.)
+        // Deliberately not using SceneUtil::registerSerializers(): its
+        // osg::Geometry stub discards vertex data, it is built for debug
+        // dumps.
         class ChunkCacheTextureTypeSerializer : public osgDB::ObjectWrapper
         {
         public:
@@ -174,8 +175,7 @@ namespace MWRender
         // SceneUtil::PositionAttitudeTransform wrapper: OpenMW's custom
         // single-precision PAT positions sub-groups inside merged chunks.
         // Without a wrapper osgDB degrades it to osg::Group, silently
-        // DROPPING the placement -> displaced ghost geometry (found by the
-        // write-verify instrumentation, first diff: "PAT m=... vs Group").
+        // dropping the placement, which displaces the geometry.
         class ChunkCachePATSerializer : public osgDB::ObjectWrapper
         {
         public:
@@ -231,7 +231,7 @@ namespace MWRender
             }
         };
 
-        // NifOsg::MatrixTransform: positions ANIMATED-mesh subtrees (banners,
+        // NifOsg::MatrixTransform: positions animated-mesh subtrees (banners,
         // waterfalls) that the optimizer cannot flatten (DYNAMIC variance).
         // Static pose lives in the osg::MatrixTransform base, so an
         // associate-chain wrapper round-trips it; the custom controller
@@ -250,8 +250,8 @@ namespace MWRender
 
         // Shader::RemovedAlphaFunc: ShaderVisitor's record of the replaced
         // alpha test (func + ref in the osg::AlphaFunc base). Without it the
-        // reread graph loses alpha-test semantics -> stippled translucent
-        // foliage/banners on cache-served chunks.
+        // reread graph loses alpha-test semantics and foliage/banners render
+        // as stippled translucency on cache-served chunks.
         class ChunkCacheRemovedAlphaFuncSerializer : public osgDB::ObjectWrapper
         {
         public:
@@ -264,7 +264,7 @@ namespace MWRender
         };
 
         // MWRender::PagedOccluderData: pre-clustered building occluder
-        // meshes for MSOC. v13: serialized with the chunk so cache-served
+        // meshes for MSOC, serialized with the chunk so cache-served
         // chunks participate in occlusion culling like live-built ones.
         bool checkPagedOccluderData(const MWRender::PagedOccluderData&)
         {
@@ -337,7 +337,7 @@ namespace MWRender
         }
 
         // Routes external image references (VFS paths) through OpenMW's
-        // ImageManager on load - osgDB cannot read from BSAs itself.
+        // ImageManager on load; osgDB cannot read from BSAs itself.
         class VfsImageReadCallback : public osgDB::ReadFileCallback
         {
         public:
@@ -373,17 +373,17 @@ namespace MWRender
             Resource::ImageManager* mImageManager;
         };
 
-        constexpr unsigned int sChunkCacheVersion = 6; // v13: occluder data in chunk files
+        constexpr unsigned int sChunkCacheVersion = 6; // 6: occluder data in chunk files
 
-        // v7.4: serializes osgDB node read/write (process-global registry).
+        // serializes osgDB node read/write (process-global registry).
         std::shared_mutex sOsgdbNodeIoMutex;
         // osgb lazy-loads serializer wrappers on first encounters (registry
         // mutation); the first reads run exclusive to warm it, then reads
-        // share the lock and only writes are exclusive (v15 parallel reads).
+        // share the lock and only writes are exclusive.
         std::atomic<unsigned int> sOsgdbWarmupReads{ 0 };
         std::mutex sChunkBuildMutex;
 
-        // v9 standalone generator: the tool has no MWBase::World. It injects
+        // The standalone generator tool has no MWBase::World. It injects
         // the two things ObjectPaging needs from one; the game path falls
         // back to World when nothing is injected.
         std::vector<std::string> sStandaloneContentFiles;
@@ -415,8 +415,8 @@ namespace MWRender
         }
     }
 
-    // v7.1: fills a placeholder Group with the produced chunk on the update
-    // traversal (main thread) - producer threads never touch the live graph.
+    // Fills a placeholder Group with the produced chunk on the update
+    // traversal (main thread); producer threads never touch the live graph.
     class ObjectPaging::ChunkSwapCallback : public osg::NodeCallback
     {
     public:
@@ -460,22 +460,17 @@ namespace MWRender
 
         const unsigned char lod = static_cast<unsigned char>(lodFlags >> (4 * 4));
 
-        // v7.5: SYNCHRONOUS production for active-grid AND the preload path
+        // Synchronous production for the active grid and the preload path
         // (compile==true: loading screen, background preloader, generation).
-        // Those callers WAIT for a complete chunk; an async placeholder that
-        // fills on another thread deadlocks that wait (a resumed cache reads
-        // ~1.5s/chunk, exposing it - an empty cache builds fast and masked
-        // it). These paths already run OFF the render thread, so synchronous
-        // production costs no frame stutter. Only the cull path (compile==
-        // false, which does NOT wait - it uses the placeholder as-is and lets
-        // it fill later) gets the async treatment, which is the stutter fix.
-        // v7.6: generation mode is FULLY synchronous - the async system
-        // exists to fix gameplay stutter and buys generation nothing, while
-        // an unresolved launch-context-dependent race froze real bakes
-        // (repeatedly, at cell-load phase) despite passing every rig run;
-        // fully synchronous bakes complete reliably. Cut async out
-        // of the path that doesn't need it; hunt the race for gameplay
-        // separately.
+        // Those callers wait for a complete chunk, and an async placeholder
+        // that fills on another thread deadlocks that wait. These paths
+        // already run off the render thread, so synchronous production costs
+        // no frame stutter. Only the cull path (compile==false, which does
+        // not wait: it uses the placeholder as-is and lets it fill later)
+        // gets the async treatment, which is the stutter fix.
+        // Generation mode is also fully synchronous: the async system exists
+        // to fix gameplay stutter and buys generation nothing, and
+        // synchronous bakes complete reliably.
         if (activeGrid || compile || sGenerationMode)
         {
             const std::filesystem::path cacheFile = activeGrid ? std::filesystem::path() : diskCachePath(id);
@@ -522,11 +517,11 @@ namespace MWRender
         mLoadQueue.emplace(distance, std::move(job));
         if (mLoadThreads.empty())
         {
-            // v15: a POOL of workers so cache READS parallelize (decompression
-            // + parse across cores). The v7.4 lesson stands for BUILDS:
-            // createChunk races shared SceneManager state, so builds still
-            // run one-at-a-time under sChunkBuildMutex regardless of pool
-            // size - at most one build + main thread = stock's assumption.
+            // A pool of workers so cache reads parallelize (decompression +
+            // parse across cores). Builds are different: createChunk races
+            // shared SceneManager state, so builds still run one-at-a-time
+            // under sChunkBuildMutex regardless of pool size. At most one
+            // build + main thread, which is what stock assumes.
             const unsigned int threadCount = std::clamp(Settings::terrain().mObjectPagingReadThreads.get(), 1, 8);
             for (unsigned int i = 0; i < threadCount; ++i)
                 mLoadThreads.emplace_back([this] { chunkLoadWorker(); });
@@ -580,8 +575,8 @@ namespace MWRender
     void ObjectPaging::enqueueCachedChunkWrite(osg::Node* node, const std::filesystem::path& file)
     {
         // Deferral absorbs load-time disable storms: a chunk that gets
-        // rebuilt five times in three seconds serializes ONCE, with the
-        // final state. The coalescing key is the filename minus the
+        // rebuilt several times in quick succession serializes once, with
+        // the final state. The coalescing key is the filename minus the
         // disabled-state salt, so newer variants supersede queued ones.
         constexpr std::chrono::seconds writeDelay(5);
 
@@ -640,7 +635,7 @@ namespace MWRender
 
     void ObjectPaging::drainWriteQueue()
     {
-        // Loads produce writes - drain the load queue first.
+        // Loads produce writes, so drain the load queue first.
         {
             std::unique_lock<std::mutex> lock(mLoadQueueMutex);
             mLoadQueueDrainCv.wait(lock, [this] { return mLoadQueue.empty() && mLoadBusy == 0; });
@@ -657,7 +652,7 @@ namespace MWRender
     {
         // resident-layer threads read chunks and build supercells; they must
         // be gone before the rest of the engine (SceneManager, osgDB state)
-        // tears down - quitting mid-stream crashed on exit otherwise
+        // tears down, or quitting mid-stream crashes on exit
         mResidentShutdown = true;
         mRingCv.notify_all();
         if (mRingThread.joinable())
@@ -694,14 +689,14 @@ namespace MWRender
             return {};
 
         std::call_once(mDiskCacheInit, [this, &dir] {
-            // v7 MANIFEST-AUTHORITATIVE model (MGE semantics): ONE named
+            // Manifest-authoritative model (MGE semantics): one named
             // generation per worldspace, with a manifest recording what it
             // was generated from (format version, geometry settings, content
-            // list). The game USES the generation unconditionally — so
+            // list). The game uses the generation unconditionally, so
             // externally generated caches built from hand-picked plugin
-            // lists are first-class — and on content/settings mismatch it
-            // WARNS and goes READ-ONLY (stale-but-consistent distant land,
-            // like outdated MGE distant land; regenerate to update).
+            // lists are first-class; on content/settings mismatch it warns
+            // and goes read-only (stale-but-consistent distant land, like
+            // outdated MGE distant land; regenerate to update).
             // Format-version mismatch is the exception: files would be
             // wrong/unreadable, so the generation is wiped and restarted.
             std::string ws = mWorldspace.serializeText();
@@ -742,7 +737,7 @@ namespace MWRender
             if (!existing.empty() && existingFormat == sChunkCacheVersion && !sGenerationMode)
             {
                 // Same file format, different content/settings: the
-                // GENERATION is authoritative. Serve it, don't write it.
+                // generation is authoritative. Serve it, don't write it.
                 Log(Debug::Warning)
                     << "Distant-land cache was generated from a different content list or settings; using it "
                        "anyway (read-only). Regenerate to update: "
@@ -755,7 +750,7 @@ namespace MWRender
                 Log(Debug::Warning) << "Distant-land cache format v" << existingFormat << " superseded by v"
                                     << sChunkCacheVersion << ": regenerating " << mDiskCacheDir;
             std::filesystem::remove_all(mDiskCacheDir, ec);
-            // prune legacy hash-named generations from pre-v7 layouts
+            // prune legacy hash-named generations from older cache layouts
             for (const auto& entry : std::filesystem::directory_iterator(wsBase, ec))
             {
                 if (entry.is_directory(ec) && entry.path() != mDiskCacheDir)
@@ -777,9 +772,9 @@ namespace MWRender
 
         // Salt with the disabled-refs state relevant to this chunk: a chunk
         // built while a quest script had an object disabled must not be
-        // served once the object is re-enabled (and vice versa). Different
-        // state -> different filename -> live rebuild; the write path prunes
-        // superseded state-variants.
+        // served once the object is re-enabled (and vice versa). A different
+        // state gives a different filename and a live rebuild; the write
+        // path prunes superseded state-variants.
         std::uint64_t salt = 0xcbf29ce484222325ull;
         {
             const osg::Vec2f minBound = center - osg::Vec2f(size / 2.f, size / 2.f);
@@ -873,7 +868,7 @@ namespace MWRender
         if (!node)
             return nullptr;
 
-        // Verify mode reads RAW: the pristine deserialized graph, so the
+        // Verify mode returns the raw deserialized graph, so the
         // write-verify diff measures pure file fidelity, unpolluted by the
         // read path's own shader regeneration below.
         if (raw)
@@ -902,7 +897,7 @@ namespace MWRender
                         // (same class name, same values) but its apply()
                         // flips the depth function under reversed-Z. A
                         // deserialized plain osg::Depth applies its function
-                        // LITERALLY -> inverted depth test -> geometry
+                        // literally, inverting the depth test so geometry
                         // renders through occluders. Restore AutoDepth.
                         const auto& attrs = ss->getAttributeList();
                         const auto it = attrs.find(std::make_pair(osg::StateAttribute::DEPTH, 0u));
@@ -931,8 +926,8 @@ namespace MWRender
         node->getBound();
         node->setNodeMask(Mask_Static);
 
-        // v13: MSOC participation is a runtime attachment (stripped at
-        // write) - re-attach on read. The callback culls the whole chunk
+        // MSOC participation is a runtime attachment (stripped at
+        // write), so re-attach on read. The callback culls the whole chunk
         // when fully occluded even without occluder data; deserialized
         // PagedOccluderData (if any) additionally makes the chunk's
         // buildings occlude what's behind them.
@@ -963,7 +958,7 @@ namespace MWRender
         // Write-verify instrumentation (env OPENMW_CHUNK_CACHE_VERIFY):
         // deterministic per-node description lines, content-hashing all
         // vertex/index arrays, so an original chunk and its disk round-trip
-        // can be diffed structurally. PROGRAM attributes are excluded (the
+        // can be diffed structurally. Program attributes are excluded (the
         // read path strips and regenerates them by design).
         class ChunkStatsVisitor : public osg::NodeVisitor
         {
@@ -1078,8 +1073,8 @@ namespace MWRender
     namespace
     {
         // Verify-mode wrapper inventory: every osg::Object class present in
-        // a chunk graph that lacks a registered osgDB wrapper will DEGRADE
-        // SILENTLY on write (the PAT lesson). Enumerate them all at once.
+        // a chunk graph that lacks a registered osgDB wrapper degrades
+        // silently on write. Enumerate them all at once.
         class WrapperInventoryVisitor : public osg::NodeVisitor
         {
         public:
@@ -1181,10 +1176,11 @@ namespace MWRender
             return nullptr; // exotic type: caller keeps the geometry as-is
         }
 
-        // Edge collapse cannot reduce disconnected card soups (tree canopies,
-        // bushes - every edge is a boundary). MGE-style fallback: keep a
-        // deterministic, evenly-spread stride of whole quads (triangle pairs)
-        // and compact the vertex arrays down to what the kept cards use.
+        // Edge collapse cannot reduce disconnected card soups (tree canopies
+        // and bushes, where every edge is a boundary). MGE-style fallback:
+        // keep a deterministic, evenly-spread stride of whole quads (triangle
+        // pairs) and compact the vertex arrays down to what the kept cards
+        // use.
         bool dropCards(osg::Geometry& geom, float ratio, const char** whyNot = nullptr)
         {
             const auto fail = [&](const char* why) {
@@ -1354,10 +1350,11 @@ namespace MWRender
                 const size_t nb = geom->getVertexArray()->getNumElements();
                 before += nb;
                 simplifier.simplify(*geom); // in place; the clone owns its arrays
-                // Edge collapse runs out of collapsible edges long before the
-                // target on card-heavy geometry (foliage: every edge is a
-                // boundary). Finish the job MGE-style: drop whole quads at a
-                // deterministic stride until the residual budget is met.
+                // Edge collapse runs out of collapsible edges long before
+                // the target on card-heavy geometry (foliage, where every
+                // edge is a boundary). Finish the job MGE-style: drop whole
+                // quads at a deterministic stride until the residual budget
+                // is met.
                 const size_t nSimp = geom->getVertexArray()->getNumElements();
                 const size_t target = static_cast<size_t>(static_cast<float>(nb) * ratio);
                 if (nSimp * 100 > target * 115)
@@ -1398,18 +1395,18 @@ namespace MWRender
             }
         }
 
-        // The node may be LIVE in the scene (v6.5 background writes), so
-        // never mutate it: serialize a STRUCTURAL clone (node/drawable/
-        // stateset shells copied; geometry arrays, textures and images
-        // shared read-only). Owning the stateset shells lets us strip the
-        // osg::Program attributes BEFORE writing - serialized programs were
-        // 90+% of file size (full GLSL text per stateset) and dominated the
+        // The node may be live in the scene (background writes), so never
+        // mutate it: serialize a structural clone (node/drawable/stateset
+        // shells copied; geometry arrays, textures and images shared
+        // read-only). Owning the stateset shells lets us strip the
+        // osg::Program attributes before writing: serialized programs are
+        // 90+% of file size (full GLSL text per stateset) and dominate the
         // read-path parse cost, only to be discarded by the read repair.
         osg::ref_ptr<osg::Node> toWrite = static_cast<osg::Node*>(node->clone(osg::CopyOp(
             osg::CopyOp::DEEP_COPY_NODES | osg::CopyOp::DEEP_COPY_DRAWABLES | osg::CopyOp::DEEP_COPY_STATESETS)));
         toWrite->setUserDataContainer(nullptr);
         toWrite->setCullCallback(nullptr);
-        // v13: occluder meshes are chunk CONTENT, not runtime state - carry
+        // Occluder meshes are chunk content, not runtime state: carry
         // them into the file (everything else in the UDC stays stripped).
         if (const osg::UserDataContainer* udc = node->getUserDataContainer())
             for (unsigned int i = 0; i < udc->getNumUserObjects(); ++i)
@@ -1439,11 +1436,11 @@ namespace MWRender
         }
 
         // External image refs need filenames. NIF-embedded textures (pixel
-        // data inside the mesh, e.g. some coral glow maps) have none - mark
+        // data inside the mesh, e.g. some coral glow maps) have none, so mark
         // exactly those images STORE_INLINE (the per-image hint overrides the
-        // global option). The previous whole-file IncludeData fallback inlined
-        // EVERY texture of any chunk containing one nameless image: measured
-        // 13.7 GB of a 15.1 GB world bake (152 of 333 supercells affected).
+        // global option). A whole-file IncludeData fallback would inline
+        // every texture of any chunk containing one nameless image and
+        // balloon the bake size.
         class MarkNamelessImageVisitor : public osg::NodeVisitor
         {
         public:
@@ -1476,16 +1473,16 @@ namespace MWRender
         node->accept(nameless);
 
         osg::ref_ptr<osgDB::Options> options = new osgDB::Options("WriteImageHint=UseExternal");
-        // osgDB picks the writer by the LAST extension, so the temp name must
+        // osgDB picks the writer by the last extension, so the temp name must
         // still end in .osgb ("X.osgb.tmp" fails with "not implemented").
         // Thread-unique counter: concurrent preload threads writing the same
         // chunk would interleave into one temp file and corrupt it.
         static std::atomic<unsigned int> sTmpCounter{ 0 };
         const std::filesystem::path tmp = file.string() + "." + std::to_string(sTmpCounter.fetch_add(1)) + ".tmp.osgb";
-        // v15: attribute slimming - byte normals (12 -> 4 bytes/vert,
-        // normalized), compact ub colors (16 -> 4), ushort indices where they
-        // fit. Smaller files AND faster parses. Operates on NEW arrays set on
-        // the cloned drawables - the originals are shared with the live scene
+        // Attribute slimming: byte normals (12 -> 4 bytes/vert, normalized),
+        // compact ub colors (16 -> 4), ushort indices where they fit.
+        // Smaller files and faster parses. Operates on new arrays set on
+        // the cloned drawables; the originals are shared with the live scene
         // and must never be touched. Skipped under write-verify (the verify
         // diff compares array types against the in-memory original).
         if (!std::getenv("OPENMW_CHUNK_CACHE_VERIFY"))
@@ -1568,9 +1565,9 @@ namespace MWRender
             }
 
             // Prune superseded disabled-state variants of this chunk
-            // (same "cx_cy_size_" prefix, different salt). NOT for supercell
-            // files - their names prefix-match their column siblings and the
-            // pruner would delete them (it did: mge-exact phase 1 smoke).
+            // (same "cx_cy_size_" prefix, different salt). Not for supercell
+            // files: their names prefix-match their column siblings and the
+            // pruner would delete them.
             const std::string fname = pruneSiblingVariants ? file.filename().string() : std::string();
             if (pruneSiblingVariants)
             {
@@ -1591,13 +1588,13 @@ namespace MWRender
                 }
             }
 
-            // Write-verify mode: two-stage VALUE-LEVEL diff against the
+            // Write-verify mode: two-stage value-level diff against the
             // in-memory original. Stage FILE: the raw deserialized graph
             // (pure file fidelity). Stage READPATH: the graph after the real
             // read path's shader regeneration (what actually renders).
-            // Attribute VALUES compare via osg's own compare() machinery -
-            // presence-only comparison previously passed wrong BlendFunc/
-            // Material values straight through to the renderer.
+            // Attribute values compare via osg's own compare() machinery;
+            // a presence-only comparison would pass wrong BlendFunc/Material
+            // values straight through to the renderer.
             if (std::getenv("OPENMW_CHUNK_CACHE_VERIFY"))
             {
                 const auto collect = [](osg::Node* root) {
@@ -1635,7 +1632,7 @@ namespace MWRender
                         out += " renderbin";
                     const auto& la = a->getAttributeList();
                     const auto& lb = b->getAttributeList();
-                    // PROGRAM is stripped/regenerated by design - exclude
+                    // PROGRAM is stripped/regenerated by design, so exclude it
                     const auto countNonProgram = [](const osg::StateSet::AttributeList& l) {
                         size_t n = 0;
                         for (const auto& p : l)
@@ -1670,9 +1667,9 @@ namespace MWRender
                                 out += std::string(" attr-override:") + ia->second.first->className();
                             else if (ia->second.first->compare(*ib->second.first) != 0)
                             {
-                                // Depth family: AutoDepth <-> osg::Depth typeid mismatch
-                                // with identical values is expected in the raw file
-                                // (repaired by ReadRepairVisitor) - compare by value.
+                                // Depth family: an AutoDepth <-> osg::Depth typeid
+                                // mismatch with identical values is expected in the raw
+                                // file (repaired by ReadRepairVisitor); compare by value.
                                 const auto* da = dynamic_cast<const osg::Depth*>(ia->second.first.get());
                                 const auto* db = dynamic_cast<const osg::Depth*>(ib->second.first.get());
                                 if (da && db && da->getFunction() == db->getFunction()
@@ -2344,14 +2341,14 @@ namespace MWRender
     osg::ref_ptr<osg::Node> ObjectPaging::createChunk(float size, const osg::Vec2f& center, bool activeGrid,
         const osg::Vec3f& viewPointIn, bool compile, unsigned char lod)
     {
-        // v7.3 DETERMINISTIC CONTENT: the builder's viewpoint must not decide
-        // what a chunk contains - a chunk built from far away permanently
-        // excluded mid-size objects (vanishing towers) once cached.
-        // Substitute the nearest position any legitimate viewer of this node
-        // can occupy: the LOD band minimum (DefaultLodCallback selects a
-        // size-S node from dist >= S * cellSize * lodFactor). Every build of
-        // a chunk is now identical regardless of who requested it, and
-        // includes everything any viewer of this band could see.
+        // Deterministic content: the builder's viewpoint must not decide
+        // what a chunk contains, or a chunk built from far away permanently
+        // excludes mid-size objects once cached. Substitute the nearest
+        // position any legitimate viewer of this node can occupy: the LOD
+        // band minimum (DefaultLodCallback selects a size-S node from
+        // dist >= S * cellSize * lodFactor). Every build of a chunk is then
+        // identical regardless of who requested it, and includes everything
+        // any viewer of this band could see.
         osg::Vec3f viewPoint = viewPointIn;
         float deterministicDistSqr = 0.f;
         if (!activeGrid)
@@ -2427,7 +2424,7 @@ namespace MWRender
         const float minSize = mMinSizeMergeFactor ? mMinSize * mMinSizeMergeFactor : mMinSize;
         // Landmark rule: objects whose scaled radius exceeds landmarkSize keep
         // their distant-chunk inclusion 'landmark range factor' times farther
-        // than the normal min-size cutoff - large low-poly landmarks survive
+        // than the normal min-size cutoff, so large low-poly landmarks survive
         // far beyond the active-grid seam without accumulating forever.
         // landmarkSize 0 = disabled (stock behaviour).
         const float landmarkSize = Settings::terrain().mObjectPagingLandmarkSize;
@@ -2574,10 +2571,11 @@ namespace MWRender
             const float mergeBenefit = analyzeVisitor.getMergeBenefit(analyzeResult) * mMergeFactor;
             const bool merge = mergeBenefit > mergeCost;
 
-            // v12: MGE-style distant mesh simplification - merged instances in
+            // MGE-style distant mesh simplification: merged instances in
             // far chunks come from a decimated template variant (ratio =
             // size^-strength), built once per (template, ratio) and reused by
-            // every chunk. Bake content changes -> recorded in the manifest.
+            // every chunk. This changes bake content, so the strength is
+            // recorded in the manifest.
             const osg::Node* mergeSource = cnode;
             if (merge && !activeGrid && simplifyStrength > 0.f && size > 1.f)
             {
@@ -2786,7 +2784,7 @@ namespace MWRender
         udc->addUserObject(templateRefs);
         if (pagedOccluderData && !pagedOccluderData->mOccluderMeshes.empty())
             udc->addUserObject(pagedOccluderData);
-        // v13: attach the occlusion callback to every distant chunk - the
+        // Attach the occlusion callback to every distant chunk: the
         // whole-chunk visibility test needs no occluder data, so even
         // building-less chunks get culled when fully hidden.
         if (mOcclusionCuller && !activeGrid && !mResidentDistantStatics.load())
@@ -2802,17 +2800,16 @@ namespace MWRender
     {
         // ==== MWDS: flat binary supercell format ====
         // The osgb path parses resident supercells at ~5 MB/s/thread and
-        // serializes every reader on osgDB's global wrapper registry - a
-        // 4 GB world took ~15 minutes to stream in. This format is plain
-        // tables (statesets, then per-class geometry arrays) parsed with
-        // bounds-checked memcpy and NO osgDB involvement, so reads scale
-        // with the thread pool and the whole world loads in seconds.
-        // Writer fails LOUD on anything it cannot represent (the silent
-        // marker_error substitution taught us that lesson).
+        // serializes every reader on osgDB's global wrapper registry, so a
+        // multi-GB world takes many minutes to stream in. This format is
+        // plain tables (statesets, then per-class geometry arrays) parsed
+        // with bounds-checked memcpy and no osgDB involvement, so reads
+        // scale with the thread pool and the whole world loads in seconds.
+        // The writer fails loudly on anything it cannot represent; silent
+        // substitution hides bake corruption.
         constexpr std::uint32_t sMwdsMagic = 0x5344574Du; // "MWDS"
-        constexpr std::uint32_t sMwdsVersion = 3; // v3: material color mode as index (v2 truncated
-                                                  // the GL-enum-valued osg ColorMode to a byte ->
-                                                  // garbage modes -> per-frame GL_INVALID_ENUM)
+        constexpr std::uint32_t sMwdsVersion = 3; // 3: material color mode stored as an index (a raw
+                                                  // GL-enum osg ColorMode does not fit a byte)
 
         struct MwdsOut
         {
@@ -2897,7 +2894,7 @@ namespace MWRender
             out.put(static_cast<std::int32_t>(ss->getRenderingHint()));
 
             // attributes: each tagged with a kind byte; unknown kinds are a
-            // WRITE error (loud), not silent degradation
+            // loud write error, not silent degradation
             std::vector<char> attrBuf;
             std::uint32_t attrCount = 0;
             MwdsOut attrs;
@@ -2912,9 +2909,8 @@ namespace MWRender
                     case osg::StateAttribute::COLORMASK:
                         // engine-injected (normals-RT setup) into the live
                         // templates the save-state refresh reads; never NIF
-                        // data. Reapplied by the engine at load - skip
-                        // silently instead of flooding the log (was ~4k
-                        // error lines per refresh).
+                        // data. Reapplied by the engine at load, so skip
+                        // silently instead of flooding the log.
                         continue;
                     case osg::StateAttribute::MATERIAL:
                     {
@@ -2922,10 +2918,8 @@ namespace MWRender
                         attrs.put(static_cast<std::uint8_t>(1));
                         attrs.put(static_cast<std::uint32_t>(flags));
                         // osg::Material::ColorMode values are GL enums (GL_AMBIENT
-                        // 0x1200 ... OFF 0x1603) - truncating to a byte produced
-                        // garbage modes and a per-frame GL_INVALID_ENUM at draw
-                        // (glColorMaterial "<mode> is not a valid material color
-                        // mode", found via OPENMW_DEBUG_OPENGL).
+                        // 0x1200 ... OFF 0x1603); truncating one to a byte gives
+                        // garbage modes and a per-frame GL_INVALID_ENUM at draw.
                         // Serialize a compact index instead.
                         std::uint8_t cmIndex;
                         switch (m->getColorMode())
@@ -3087,7 +3081,7 @@ namespace MWRender
         }
 
         // shared texture objects: every stateset that binds the same image
-        // with the same sampling params must reference ONE osg::Texture2D,
+        // with the same sampling params must reference one osg::Texture2D,
         // or state sorting degenerates to per-drawable rebinds
         std::mutex sMwdsTexCacheMutex;
         std::map<std::string, osg::ref_ptr<osg::Texture2D>> sMwdsTexCache;
@@ -3562,12 +3556,12 @@ namespace MWRender
         const char* const sClassSuffix[3] = { ".near.mwds", ".far.mwds", ".vf.mwds" };
         const char* const sClassName[3] = { ".near", ".far", ".vf" };
 
-        // MGE-style band separation, evaluated LIVE per frame: a resident
+        // MGE-style band separation, evaluated live per frame: a resident
         // block renders only when it is (a) not already covered by stock
         // rendering (which reaches the viewing distance) and (b) inside its
         // class's end distance ('distant statics end *', 0 = horizon). Both
         // read current settings, so the in-game viewing-distance slider and
-        // the class ends apply instantly - nothing is baked into the data.
+        // the class ends apply instantly; nothing is baked into the data.
         class DistantBandCullCallback
             : public SceneUtil::NodeCallback<DistantBandCullCallback, osg::Node*, osgUtil::CullVisitor*>
         {
@@ -3657,9 +3651,9 @@ namespace MWRender
             classes.push_back(std::move(cd));
         }
 
-        // dedup statesets by serialized VALUE: after the optimizer most
+        // dedup statesets by serialized value: after the optimizer most
         // geometries carry pointer-distinct but byte-identical state, and
-        // pointer-keyed dedup shipped thousands of duplicate state records
+        // pointer-keyed dedup ships thousands of duplicate state records
         // per city supercell (state-sort collapse at render time)
         std::map<std::vector<const osg::StateSet*>, std::uint32_t> chainToRecord;
         std::map<std::vector<char>, std::uint32_t> bytesToRecord;
@@ -3842,15 +3836,14 @@ namespace MWRender
         std::uint64_t hash = 0xcbf29ce484222325ull;
         {
             // generator version: bump to invalidate every sidecar when the
-            // bake OUTPUT changes without its INPUTS changing
-            // (v2: correctMeshPath fix - v1 baked marker_error clones)
-            constexpr std::uint32_t genVersion = 8; // v8: per-cell blocks, runtime band/end culling
+            // bake output changes without its inputs changing
+            constexpr std::uint32_t genVersion = 8; // 8: per-cell blocks, runtime band/end culling
             hash = chunkCacheFnv1a(hash, &genVersion, sizeof(genVersion));
         }
         {
-            // class MIN SIZES are part of supercell identity (they gate what
-            // is baked); END distances are runtime cull settings since v8 and
-            // deliberately NOT hashed - changing them needs no rebake
+            // class min sizes are part of supercell identity (they gate what
+            // is baked); end distances are runtime cull settings and are
+            // deliberately not hashed, changing them needs no rebake
             const float classSettings[3] = { Settings::terrain().mDistantStaticsMinNear,
                 Settings::terrain().mDistantStaticsMinFar, Settings::terrain().mDistantStaticsMinVeryFar };
             hash = chunkCacheFnv1a(hash, classSettings, sizeof(classSettings));
@@ -3875,7 +3868,7 @@ namespace MWRender
             std::ifstream in(stateFile);
             std::uint64_t existing = 0;
             if (in >> existing && existing == hash)
-                return hash; // up to date - the incremental-refresh skip
+                return hash; // up to date, the incremental-refresh skip
         }
 
         const float minSize[3] = { Settings::terrain().mDistantStaticsMinNear,
@@ -3888,8 +3881,8 @@ namespace MWRender
         std::string dbgFirstError;
         constexpr auto copyMask = ~Mask_UpdateVisitor;
         // one group per (class, cell): fine-grained blocks so the runtime
-        // band boundary doesn't operate at whole-supercell granularity (the
-        // vanishing-city-block lesson)
+        // band boundary doesn't operate at whole-supercell granularity and
+        // cull whole city blocks at once
         osg::ref_ptr<osg::Group> blockGroup[3][sSupercellSize * sSupercellSize];
         for (int k = 0; k < 3; ++k)
             for (int b = 0; b < sSupercellSize * sSupercellSize; ++b)
@@ -3905,9 +3898,9 @@ namespace MWRender
             VFS::Path::Normalized model(getModel(type, ref.mRefId, store));
             if (model.empty())
                 continue;
-            // ESM model strings are relative to meshes/ - without this the
+            // ESM model strings are relative to meshes/; without this the
             // VFS lookup fails and getTemplate substitutes marker_error for
-            // EVERY static (an all-placeholder distant layer)
+            // every static (an all-placeholder distant layer)
             model = Misc::ResourceHelpers::correctMeshPath(model);
             osg::ref_ptr<const osg::Node> cnode;
             try
@@ -3921,7 +3914,7 @@ namespace MWRender
                     dbgFirstError = e.what();
                 continue;
             }
-            // classify by GEOMETRY bounds only: the node bound also spans glow
+            // classify by geometry bounds only: the node bound also spans glow
             // billboards and particle emitters, inflating a 30-unit lantern to
             // a 300-unit "landmark" and flooding the near class with clutter
             float geomRadius;
@@ -3995,8 +3988,8 @@ namespace MWRender
             copyop.mNodePath.push_back(trans);
             copyop.mViewVector = osg::Vec3f(0.f, 0.f, 1.f);
             // full distance range: a resident supercell serves every distance,
-            // so keep every LOD child ({0,0} made every intersection empty and
-            // silently dropped whole NiLODNode subtrees)
+            // so keep every LOD child ({0,0} makes every intersection empty
+            // and silently drops whole NiLODNode subtrees)
             copyop.mDistances = LODRange{ 0.f, std::numeric_limits<float>::max() };
             copyop.setCopyFlags(osg::CopyOp::DEEP_COPY_NODES | osg::CopyOp::DEEP_COPY_DRAWABLES);
             copyop.copy(cnode, trans);
@@ -4214,7 +4207,7 @@ namespace MWRender
 
         mResidentRefreshThread = std::thread([this, refStates, dir, cells = std::move(cells)] {
             // the initial resident load and this refresh contend for the
-            // osgDB registry lock and the same cores - let the load finish
+            // osgDB registry lock and the same cores, so let the load finish
             // first (it is the user-visible one)
             while (mResidentLoadActive.load() && !mResidentShutdown.load())
                 std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -4236,7 +4229,7 @@ namespace MWRender
                     continue;
                 }
                 if (!written)
-                    continue; // hash matched the sidecar - supercell unaffected by this save
+                    continue; // hash matched the sidecar, supercell unaffected by this save
                 ++rebuilt;
                 const int ringCells[3] = { Settings::terrain().mDistantStaticsNearRingCells,
                     Settings::terrain().mDistantStaticsFarRingCells,

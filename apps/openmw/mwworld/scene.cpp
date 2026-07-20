@@ -1149,13 +1149,13 @@ namespace MWWorld
             exteriorPositions.push_back(PositionCellGrid{
                 predictedPos, gridCenterToBounds(getNewGridCenter(predictedPos, &mCurrentGridCenter)) });
 
-            // v7.2 pessimistic perimeter preload: with async chunk production
-            // a grid shift swaps real cells for a paged chunk that may not be
-            // produced yet - stepping backward could leave a HOLE where a
-            // city stood for seconds. Preloading with a one-cell-SHRUNK grid
-            // keeps the paged versions of the active grid's outermost ring
-            // produced at all times, so any crossing in any direction finds
-            // its replacement chunk ready.
+            // Pessimistic perimeter preload: with async chunk production a
+            // grid shift swaps real cells for a paged chunk that may not be
+            // produced yet, leaving a visible hole until it arrives.
+            // Preloading with a grid shrunk by one cell keeps the paged
+            // versions of the active grid's outermost ring produced at all
+            // times, so a crossing in any direction finds its replacement
+            // chunk ready.
             const osg::Vec4i bounds = gridCenterToBounds(mCurrentGridCenter);
             const osg::Vec4i shrunk(bounds.x() + 1, bounds.y() + 1, bounds.z() - 1, bounds.w() - 1);
             if (shrunk.x() < shrunk.z() && shrunk.y() < shrunk.w())

@@ -46,8 +46,8 @@ void doLighting(vec3 viewPos, vec3 viewNormal, float shininess, out vec3 diffuse
     ambientLight = gl_LightModel.ambient.xyz;
     specularLight = lcalcSpecular(0).xyz * calcSpecIntensity(viewNormal, viewDir, shininess, sunDir);
 #if PER_PIXEL_LIGHTING
-    // MGE XE shadow color: shadecolor=(1.0, 0.97, 0.81), shade=0.4
-    // Blue preserved most in shadow -> slight cool shift (sky-fill)
+    // MGE XE shadow color: shadecolor=(1.0, 0.97, 0.81), shade=0.4.
+    // Blue is preserved most in shadow, giving a slight cool sky-fill shift.
     vec3 shadowTint = 1.0 - vec3(1.0, 0.97, 0.81) * 0.4 * (1.0 - shadowing);
     diffuseLight *= shadowTint;
     specularLight *= shadowTint;

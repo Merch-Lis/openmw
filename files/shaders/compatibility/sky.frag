@@ -38,12 +38,13 @@ void paintAtmosphere(inout vec4 color)
     color.xyz = mgeFogColourSky(skyWorldDir(), gl_FrontMaterial.emission.xyz, gl_FrontMaterial.emission.xyz)
               + vec3(mgeSkyDither(gl_FragCoord.xy));
     // Vanilla fades the dome rim to transparency (vertex alpha) so the
-    // CLEAR COLOUR (= raw palette fog) shows through as the sky-fog blend.
+    // clear colour (the raw palette fog) shows through as the sky-fog blend.
     // MGE instead re-colours the engine fog to scatter every frame
-    // (distantland.cpp "Simplified version of scattering"); our dome already
-    // carries the correct colour at every direction, so render it opaque —
-    // the palette colour must never show through in nice weather (under a
-    // dark-fog palette like MGG it reads as a blue band above the horizon).
+    // (distantland.cpp "Simplified version of scattering"). This dome
+    // already carries the correct colour at every direction, so render it
+    // opaque: the palette colour must never show through in nice weather
+    // (under a dark-fog palette like MGG it reads as a blue band above the
+    // horizon).
     color.a = 1.0;
 }
 
@@ -60,18 +61,19 @@ void paintClouds(inout vec4 color)
     color.xyz = clamp(color.xyz * gl_FrontMaterial.emission.xyz, 0.0, 1.0);
 
     // ease transition between clear color and atmosphere/clouds.
-    // DELIBERATE deviation from both stock and MGE: stock fades clouds to
-    // gl_Fog.color because ITS scene fog converges there — ours converges to
-    // the scatter colour, and a dark palette fog (e.g. MGG Clear deep blue)
-    // otherwise paints a fog-coloured band across the horizon sky. MGE
-    // needs no fade at all only because its cloud rim sits against the
-    // scatter dome. Fade to the dome colour at this direction instead:
-    // nice weather -> scatter, bad weather -> palette fog (= stock).
+    // Deliberate deviation from both stock and MGE: stock fades clouds to
+    // gl_Fog.color because its scene fog converges there, but this fog
+    // model converges to the scatter colour, and a dark palette fog (e.g.
+    // MGG Clear deep blue) would otherwise paint a fog-coloured band across
+    // the horizon sky. MGE needs no fade at all only because its cloud rim
+    // sits against the scatter dome. Fade to the dome colour at this
+    // direction instead: nice weather gives scatter, bad weather gives
+    // palette fog (matching stock).
     vec3 horizonCol = mgeFogColourSky(skyWorldDir(), gl_Fog.color.xyz, gl_FrontMaterial.emission.xyz);
 
-    // Dense-weather raised sky-fog band: clouds fade
-    // into the band wherever it covers the dome, so fog visually wraps
-    // tall massifs instead of dark clouds cutting in right above them.
+    // Dense-weather raised sky-fog band: clouds fade into the band
+    // wherever it covers the dome, so fog visually wraps tall massifs
+    // instead of dark clouds cutting in right above them.
     // mgeSkyFogH is raise-aware and ff-gated: in Clear/Cloudy the band is
     // the stock XE rim and this mix is a no-op above it.
     float wDenseCloud = mgeDerivedFog().wDense;
@@ -115,11 +117,11 @@ void paintSun(inout vec4 color)
 
 void paintSunglare(inout vec4 color)
 {
-    // MGE parity: the classic Sunshafts shader declares
-    // disableSunglare — MGE suppresses the vanilla sunglare while it runs
-    // (its own disc + rays replace it). OpenMW has no annotation channel,
-    // so suppress here; without this BOTH glare stacks draw and the sun
-    // reads far too hot (especially at sunset, amplified by bloom).
+    // MGE parity: the classic Sunshafts shader declares disableSunglare,
+    // and MGE suppresses the vanilla sunglare while it runs (its own disc
+    // + rays replace it). OpenMW has no annotation channel, so suppress
+    // here; without this both glare stacks draw and the sun reads far too
+    // hot (especially at sunset, amplified by bloom).
     color = vec4(0.0);
 }
 
@@ -154,7 +156,7 @@ void main()
     }
 
     // Underwater source probe (mge_fog.glsl, normally off): everything the
-    // sky program draws while the camera is submerged tints GREEN.
+    // sky program draws while the camera is submerged tints green.
     if (mgeUwProbe())
         color.xyz = mix(color.xyz, vec3(0.0, 1.0, 0.0), 0.6);
 

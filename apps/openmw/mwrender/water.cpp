@@ -260,9 +260,9 @@ namespace MWRender
             camera->addCullCallback(new InheritViewPointCallback);
             camera->setComputeNearFarMode(osg::CullSettings::DO_NOT_COMPUTE_NEAR_FAR);
 
-            // Viewer above water: no need for fog here, we are already applying fog on the water surface itself as
-            // well as underwater fog - fog stays effectively off via the large ranges set in the constructor
-            // (shaders don't respect glDisable(GL_FOG)). Viewer below water: the RTT shows the ABOVE-water world,
+            // Viewer above water: no need for fog here, we already apply fog on the water surface itself as well
+            // as underwater fog. Fog stays effectively off via the large ranges set in the constructor, since
+            // shaders don't respect glDisable(GL_FOG). Viewer below water: the RTT shows the above-water world,
             // and setViewerFog swaps in the real above-water fog state so distant content keeps its atmospheric
             // haze; the shaders route this pass to the above-water fog model via the isRefraction uniform.
             camera->getOrCreateStateSet()->setAttributeAndModes(

@@ -1,10 +1,8 @@
-// openmw-distantlandtool: standalone distant-land (object paging chunk)
-// generator. MGE XE parity: a pure batch tool - no game boot, no window, no
-// frame clock - iterating the same quadtree structure the game builds and
-// producing chunks through the game's own ObjectPaging code (deterministic
-// content since v7.3, so chunks are identical regardless of who builds
-// them). Freezes of the in-game generation path cannot exist here by
-// construction: there is no loading pump to stall.
+// openmw-distantlandtool: standalone generator for distant-land (object
+// paging) chunks. A pure batch tool with no game boot, window, or frame
+// clock. It walks the same quadtree structure the game builds and produces
+// chunks through the game's own ObjectPaging code, so the output is
+// identical to what a live session would generate.
 
 #include <components/debug/debugging.hpp>
 #include <components/debug/debuglog.hpp>
@@ -138,9 +136,9 @@ namespace
     }
 
     // Replicates components/terrain/quadtreeworld.cpp: QuadTreeBuilder root
-    // construction + DefaultLodCallback band selection + getVertexLod. The
-    // node COORDINATES follow the same arithmetic as the game's builder;
-    // this walk is a SUPERSET of the game's (no land-validity pruning), and
+    // construction, DefaultLodCallback band selection, and getVertexLod.
+    // Node coordinates follow the same arithmetic as the game's builder.
+    // The walk is a superset of the game's (no land-validity pruning);
     // superfluous nodes produce empty chunks that are simply not written.
     struct NodeSelector
     {
@@ -327,7 +325,7 @@ namespace
                          << "], quadtree root " << rootSize << " @ (" << rootCenterX << "," << rootCenterY << ")";
 
         NodeSelector selector;
-        selector.mMinSize = Settings::terrain().mObjectPagingMinSize; // node granularity floor for OBJECT chunks
+        selector.mMinSize = Settings::terrain().mObjectPagingMinSize; // node granularity floor for object chunks
         selector.mLodFactor = Settings::terrain().mLodFactor;
         selector.mViewDistance = Settings::camera().mViewingDistance;
         selector.mCellWorldSize = static_cast<float>(ESM::getCellSize(ESM::Cell::sDefaultWorldspaceId));
@@ -446,8 +444,8 @@ namespace
             sceneManager.clearCache();
             Log(Debug::Info) << "Distant land generation: " << done << "/" << lattice.size() << " (built " << built
                              << ", resumed-skip " << skipped << ")";
-            // Abort at the first failed write (disk full is not transient) -
-            // don't burn an hour producing chunks that cannot land.
+            // Abort at the first failed write: disk full is not transient,
+            // and chunks that cannot be written are wasted work.
             if (paging.getWriteFailureCount())
                 break;
         }

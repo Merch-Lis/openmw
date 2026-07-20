@@ -1,7 +1,7 @@
 #ifndef MGE_FOG_GLSL
 #define MGE_FOG_GLSL
 // ============================================================================
-// MGE XE fog & atmospheric scattering port (shared core) — LIVE 0.18 model
+// MGE XE fog & atmospheric scattering port (shared core), live 0.18 model.
 // Reference implementation: MGE XE shaders\core\XE Common.fx
 // (fogColourScatter/fogColour/fogColourSky, USE_EXPFOG + USE_SCATTERING
 // branches) + MGE XE engine source distantland.cpp
@@ -13,8 +13,8 @@
 //   inscatter = scatterColour(dir, saturate(0.224*x)) in nice weather
 //             = (1 - fog) * fogColour(palette)        otherwise
 //   applied as: scene' = fog * scene + inscatter      (fogApply)
-// The 0.224 inscatter distance is what keeps mid-range haze DIM and blue
-// relative to the fogdist=1 horizon/sky - do not "fill" with the sky colour.
+// The 0.224 inscatter distance keeps mid-range haze dim and blue relative
+// to the fogdist=1 horizon/sky; don't substitute the sky colour here.
 //
 // Engine-side range setup (distantland.cpp adjustFog, exp-fog branch):
 //   fogEnd   = max(0.875, ff * AboveWaterFogEnd)                    [cells]
@@ -42,11 +42,11 @@ uniform vec3 mgeSkyColor;
 // guard falls back to Clear weather (ff=1, fo=0, exterior, day).
 uniform vec4 mgeFogParams;
 // World-space sun direction (patch v5+), identical to light 0 in the main
-// pass but valid in EVERY pass — the RTT sky rendering has no usable
-// light 0, and normalize(0) NaN painted the reflected sky black.
+// pass but valid in every pass. RTT passes (e.g. the reflected sky) have
+// no usable light 0, and normalize(0) there produces NaN.
 uniform vec3 mgeSunDir;
 
-// Scattering coefficients. Managed by scripts/wa_preset_apply.py — currently
+// Scattering coefficients. Managed by scripts/wa_preset_apply.py, currently
 // the WA "MGG" preset. XE engine defaults (distantinit.cpp)
 // would be out (0.07,0.36,0.76) / in (0.25,0.38,0.48).
 const vec3 mgeOutscatter        = vec3(0.2411, 0.4339, 0.6677);
@@ -59,15 +59,15 @@ uniform vec3 mgeOutscatterU;
 uniform vec3 mgeInscatterU;
 uniform float mgeScatterUniformsOn;
 
-// Scatter FORMULA era. The constants changed between the 2020-era XE build
-// (MGE XE 0.11-era XE Common.fx — the era the MGG preset was tuned against)
+// Scatter formula era. The constants changed between the 2020-era XE build
+// (MGE XE 0.11-era XE Common.fx, which the MGG preset was tuned against)
 // and the live 2023 install (0.18-style). Mixing MGG coefficients with the
-// live formula washes clear weather to white (doc §4f); keep preset era and
-// formula era together. 1 = 2020/0.11-era, 0 = live/0.18-style.
+// live formula washes clear weather to white (doc §4f), so keep preset era
+// and formula era together. 1 = 2020/0.11-era, 0 = live/0.18-style.
 #define MGE_SCATTER_ERA_2020 1
 
 #if MGE_SCATTER_ERA_2020
-// newskycol = 0.38*sky + fixed blue; fixed term keeps clear haze BLUE.
+// newskycol = 0.38*sky + fixed blue; the fixed term keeps clear haze blue.
 const vec3 mgeSkyBase           = vec3(0.23, 0.39, 0.68);
 const float mgeSkyWeight        = 0.38;
 const float mgeExpFogDistScale  = 4.0;   // ini "Exponential Distance
@@ -82,9 +82,9 @@ const float mgeExpFogDistScale  = 4.4;   // constexpr in distantland.cpp
 const float mgeCell             = 8192.0;
 const float mgeAWFogStart       = 2.0;   // Above Water Fog Start [cells]
 const float mgeAWFogEnd         = 5.0;   // Above Water Fog End   [cells]
-// Morrowind's own draw range in MGE XE: inside it the vanilla
-// renderer fogs the scene with the LINEAR near-fog range adjustFog fits to
-// the exp curve (see mgeFogColourWorld); MGE's exp fog only rules beyond.
+// Morrowind's own draw range in MGE XE: inside it the vanilla renderer
+// fogs the scene with the linear near-fog range adjustFog fits to the exp
+// curve (see mgeFogColourWorld); MGE's exp fog only rules beyond.
 const float mgeNearViewRange    = 7168.0;
 // Live override from the engine ([Fog] 'mge fog start/end cells', fed as a
 // uniform; the Distant Land Generator app edits those settings). 0 = use
@@ -120,10 +120,10 @@ vec4 mgeGetFogParams() // (ff, fo, isExterior, isDay)
 // Weather-transition endpoints (patched engine): Cur = (ff, fo, valid, 0),
 // Next = (ff, fo, blend, 0). The fog ranges below contain knee-shaped
 // terms (dense pull-in, layer gates) that ramp over a narrow ff band;
-// deriving from the BLENDED ff would compress their whole visual change
+// deriving from the blended ff would compress their whole visual change
 // into a fraction of a transition. Instead derive at both endpoint
-// weathers and lerp the derived values - endpoint looks are unchanged,
-// the transition path becomes even.
+// weathers and lerp the derived values: endpoint looks are unchanged and
+// the transition path is even.
 uniform vec4 mgeFogParamsCur;
 uniform vec4 mgeFogParamsNext;
 
@@ -185,18 +185,17 @@ MgeFogDerived mgeDerivedFog()
     return mgeDeriveFogAt(p.x, p.y);
 }
 
-// Dense-weather sky-fog band raise: the XE
-// dome blend puts SOLID fog colour only below dirZ ~0.075 (~4 deg) - tall
-// massifs (Red Mountain subtends 10-15 deg from Ald-Ruhn) poke above the
-// fogged sky into the cloud layer and read as cutouts, while ordinary
-// low landscape sits inside the band and looks right. In dense weathers
-// the band is raised: the same XE curve evaluated at dirZ / raise,
-// lerped in by the ff weight so Clear/Cloudy keep the exact XE dome.
-// Tune mgeFogSkyRaise: 2.0 (subtle) .. 5.0 (fog wraps very tall peaks).
-// Kept at 1.0 (stock XE dome) - the
-// layered per-fragment height fog below replaces the raised-band
-// approach: summits now shed fog by their OWN altitude instead of the
-// sky band being lifted to meet them.
+// Dense-weather sky-fog band raise. The XE dome blend puts solid fog
+// colour only below dirZ ~0.075 (~4 deg); tall massifs (Red Mountain
+// subtends 10-15 deg from Ald-Ruhn) poke above the fogged sky into the
+// cloud layer and read as cutouts, while ordinary low landscape sits
+// inside the band and looks right. In dense weathers the band can be
+// raised: the same XE curve evaluated at dirZ / raise, lerped in by the
+// ff weight so Clear/Cloudy keep the exact XE dome. Tune mgeFogSkyRaise:
+// 2.0 (subtle) .. 5.0 (fog wraps very tall peaks). Kept at 1.0 (stock XE
+// dome) because the layered per-fragment height fog below covers the same
+// problem: summits shed fog by their own altitude instead of the sky band
+// being lifted to meet them.
 const float mgeFogSkyRaise = 1.0;
 float mgeSkyFogH(float dirZ)
 {
@@ -210,27 +209,27 @@ float mgeSkyFogH(float dirZ)
 // false everywhere else.
 uniform bool isReflection;
 
-// True when the MAIN viewer is underwater; set per frame on the root
+// True when the main viewer is underwater; set per frame on the root
 // stateset by the engine (SharedUniformStateUpdater, from the same
 // isUnderwater state that switches gl_Fog). Authoritative for every pass:
-// earlier matrix-sniffing detection (mirrored view matrix / camera z)
-// misfired per-program under OSG's matrix plumbing.
+// deriving underwater state from the view matrix or camera z is unreliable
+// per-program under OSG's matrix plumbing.
 uniform bool viewerUnderwater;
 
 // Set true on the water-refraction camera's StateSet by the engine
 // (water.cpp); GLSL/root default false everywhere else.
 uniform bool isRefraction;
 
-// True when fog should use the above-water model. Follows the MAIN viewer
+// True when fog should use the above-water model. Follows the main viewer
 // for the reflection RTT too: the water-reflection camera is mirrored
 // through the surface, so its distances equal the full camera->surface->
-// object light path - fogging the reflection with the viewer's own medium
-// makes submerged objects vanish in the reflection exactly as the murk
-// hides them from the viewer (from below) while keeping above-water
-// reflections on the atmospheric model (from above). The refraction RTT is
-// the exception: from below it renders the ABOVE-water world (the engine
-// feeds it the above-water gl_Fog state), so it stays on the above-water
-// model - distant trees keep their haze and emerging is seamless. Other
+// object light path. Fogging the reflection with the viewer's own medium
+// therefore fades submerged objects in the reflection at the same rate
+// the murk hides them in direct view, while above-water reflections stay
+// on the atmospheric model. The refraction RTT is the exception: from
+// below it renders the above-water world (the engine feeds it the
+// above-water gl_Fog state), so it stays on the above-water model and
+// distant trees keep their haze when the viewer surfaces. Other
 // fog-disabled utility RTTs (local map, previews) early-out on the
 // gl_Fog.start sentinel before this matters.
 bool mgeCamAboveWater()
@@ -238,16 +237,16 @@ bool mgeCamAboveWater()
     return !viewerUnderwater || isRefraction;
 }
 
-// ==== UNDERWATER SOURCE PROBE (diagnostic, normally 0) ====
-// False-colours the from-below view by SOURCE RENDERER so one screenshot
+// ==== Underwater source probe (diagnostic, normally 0) ====
+// False-colours the from-below view by source renderer so one screenshot
 // attributes any banding to the pass that draws it:
-//   BLUE  tint = scene geometry fogged by the underwater fog branch
-//   GREEN tint = the sky dome drawn directly (sky.frag)
-//   RED   tint = the water surface plane (water.frag from below)
+//   blue  tint = scene geometry fogged by the underwater fog branch
+//   green tint = the sky dome drawn directly (sky.frag)
+//   red   tint = the water surface plane (water.frag from below)
 // Reflection RTT content is deliberately untinted (isReflection forces the
-// above-water path), so untinted bright areas INSIDE the red surface
-// region = reflection/refraction injection; untinted banding across all
-// regions = the post chain (bisect with the F2 live toggles).
+// above-water path). Untinted bright areas inside the red surface region
+// point to reflection/refraction injection; untinted banding across all
+// regions points to the post chain (bisect with the F2 live toggles).
 #define MGE_UW_SOURCE_PROBE 0
 bool mgeUwProbe()
 {
@@ -268,7 +267,7 @@ float mgeUwFogDist()
     return (gl_Fog.end > 1.0 && gl_Fog.end < 1000000.0) ? gl_Fog.end * 0.33 : 800.0;
 }
 
-// Core scatter equation — XE Common.fx fogColourScatter nice branch,
+// Core scatter equation: XE Common.fx fogColourScatter nice branch,
 // verbatim (live 0.18 constants). fogdist in [0,1].
 vec3 mgeScatter(vec3 dir, float fogdist, vec3 skyCol)
 {
@@ -287,7 +286,7 @@ vec3 mgeScatter(vec3 dir, float fogdist, vec3 skyCol)
         else
             sunWorld = vec3(0.0, 0.0, 1.0);
     }
-    // MGE parity: at night the engine sun light still travels ABOVE the
+    // MGE parity: at night the engine sun light still travels above the
     // horizon (invisible); MGE flips sunPos.z downward when sunVis==0 so the
     // scattering sees a below-horizon sun and sunaltitude_b kills the scatter
     // (near-black night fog). Replicate via the isDay flag.
@@ -342,13 +341,13 @@ vec3 mgeScatter(vec3 dir, float fogdist, vec3 skyCol)
 // fogColour(): rgb = inscattered light, a = transmittance.
 // Apply as: scene' = a * scene + rgb   (XE Common.fx fogApply)
 // useNearLinear: XE fogColour (land/objects) switches to the vanilla
-// LINEAR near fog inside nearViewRange; fogColourWater is pure exp.
+// linear near fog inside nearViewRange; fogColourWater is pure exp.
 vec4 mgeFogColourWorld(float dist, vec3 dirWorld, float far, vec3 skyCol, bool useNearLinear, vec4 skyBehind)
 {
     // Fog-off convention: utility RTT cameras (local map, character preview)
     // "disable" fog by setting gl_Fog.start/end = 1e7 ("shaders don't
-    // respect glDisable(GL_FOG)", localmap.cpp). Our absolute world-unit
-    // ranges ignored that and hazed every re-rendered MAP TILE.
+    // respect glDisable(GL_FOG)", localmap.cpp). The absolute world-unit
+    // ranges here must honour that sentinel or map tiles get hazed.
     if (gl_Fog.start > 1000000.0)
         return vec4(0.0, 0.0, 0.0, 1.0);
 
@@ -364,16 +363,17 @@ vec4 mgeFogColourWorld(float dist, vec3 dirWorld, float far, vec3 skyCol, bool u
     if (!mgeCamAboveWater())
     {
         // Exterior underwater: one smooth exponential murk. A linear chord
-        // clamps to full fog at a fixed distance -> a fixed world-elevation
-        // ring that reads as a hard horizontal line sliding with camera
-        // pitch; exp has no such kink and reaches clear (T=1) at the camera.
-        // The water surface, seabed, and the reflection/refraction fades in
-        // water.frag all converge to gl_Fog.color on THIS same law, so the
-        // from-below view is a single medium instead of stacked bands.
+        // clamps to full fog at a fixed distance, producing a fixed
+        // world-elevation ring that reads as a hard horizontal line sliding
+        // with camera pitch; exp has no such kink and reaches clear (T=1)
+        // at the camera. The water surface, seabed, and the reflection/
+        // refraction fades in water.frag all converge to gl_Fog.color on
+        // the same law, so the from-below view is a single medium instead
+        // of stacked bands.
         float T = exp(-dist / mgeUwFogDist());
         vec3 uwFogCol = gl_Fog.color.xyz;
         if (mgeUwProbe())
-            uwFogCol = mix(uwFogCol, vec3(0.0, 0.0, 1.0), 0.6); // probe: murk = BLUE
+            uwFogCol = mix(uwFogCol, vec3(0.0, 0.0, 1.0), 0.6); // probe: murk tinted blue
         return vec4((1.0 - T) * uwFogCol, T);
     }
 
@@ -385,54 +385,45 @@ vec4 mgeFogColourWorld(float dist, vec3 dirWorld, float far, vec3 skyCol, bool u
     float fogExpStart = dv.expStart;
     float fogExpDivisor = dv.expDiv;
 
-    // ===== Height-aware scene fog
-    // with a capped grip on geometry. B's camera-anchored height profile
-    // returns (summits shed accumulated depth, valleys gain), and after
-    // the curve a TRANSMITTANCE FLOOR stops fog from ever fully owning a
-    // surface - geometry always keeps a slice of its own shading, so
-    // silhouettes read slightly DARKER than the adjacent sky (the natural
-    // relationship) instead of milking out whiter than the fog. Scene-only
+    // ===== Height-aware scene fog =====
+    // A camera-anchored height profile lets summits shed accumulated depth
+    // and valleys gain it, and after the curve a transmittance floor stops
+    // fog from ever fully owning a surface: geometry always keeps a slice
+    // of its own shading, so silhouettes read slightly darker than the
+    // adjacent sky instead of milking out whiter than the fog. Scene-only
     // (a unified post-pass variant is kept in reserve as
     // mwse_fog_volumetric.omwfx, currently passthrough).
     float wDense = dv.wDense;
     float distEff = dist;
     if (wDense > 0.001)
     {
-        // LAYER model: the density factor is the
-        // fog-layer density AT THE FRAGMENT'S OWN ALTITUDE, exp(-dz/H)
-        // with dz = fragment height above the camera - NOT the
-        // ray-integrated average used before, which let the low-air path
-        // to a summit drown the per-part variation ("the entire entity
-        // gets uniform treatment"). Per-fragment by construction: one
-        // mountain fogs fully at its base and sheds fog up its slopes.
-        // Not path-physical - a deliberate perceptual choice. Tune H
-        // (layer thickness) and the clamp floor (max shed).
-        // A pure fragment-endpoint density strips all atmosphere off
-        // elevated massifs (treats the whole path as summit-thin air);
-        // the RAY-INTEGRATED closed form is the converging middle: dense
-        // air near the base still contributes, thin air at altitude
-        // relieves.
-        // Kept from the endpoint round: full-strength wLayer gate from
-        // Overcast (ff<=0.7) down, H=3072. Expected (Overcast, RM from
-        // Ald-Ruhn): summit ~50% fogged, ridge towers ~60%, fence ~70%.
-        // Calibration knobs: H (layer thickness) and the floor.
-        // Tuned: H raised (heights shed less), floor raised, and the fog
-        // start pulled closer in dense weathers so mid-range low rocks
-        // gain haze (the two-piece envelope itself, dense-gated).
+        // Layer model: the fog-layer density falls off with altitude as
+        // exp(-dz/H), dz = fragment height above the camera, integrated
+        // along the ray in closed form. Per-fragment by construction: one
+        // mountain fogs fully at its base and sheds fog up its slopes. A
+        // ray-averaged density would give the whole entity one uniform
+        // treatment; a pure fragment-endpoint density would treat the
+        // whole path as summit-thin air and strip all atmosphere off
+        // elevated massifs. The ray-integrated closed form is the middle:
+        // dense air near the base still contributes, thin air at altitude
+        // relieves. Not path-physical, a deliberate perceptual choice.
+        // Full-strength wLayer gate from Overcast (ff<=0.7) down.
+        // Calibration knobs: H (layer thickness) and the clamp floor
+        // (max shed).
         const float mgeFogScaleHeight = 4608.0;
         float wLayer = dv.wLayer;
         float dz = dirWorld.z * dist;
         float F = 1.0;
         if (abs(dz) > 1.0)
             F = (mgeFogScaleHeight / dz) * (1.0 - exp(-clamp(dz / mgeFogScaleHeight, -30.0, 30.0)));
-        // Angle-dependent shed limit: steep
-        // look-up (local towering rock) may shed far more fog than a
-        // distant massif at grazing elevation.
+        // Angle-dependent shed limit: a steep look-up (local towering
+        // rock) may shed far more fog than a distant massif at grazing
+        // elevation.
         float steep = smoothstep(0.25, 0.6, dirWorld.z);
         F = clamp(F, mix(0.25, 0.08, steep), 2.5);
         distEff = dist * mix(1.0, F, wLayer);
     }
-    // ===== end OPTION D (floor applied after the curve below) =====
+    // ===== end height-aware scene fog (floor applied after the curve below) =====
 
     float x = (distEff - fogExpStart) / fogExpDivisor;
     float fog;
@@ -440,12 +431,12 @@ vec4 mgeFogColourWorld(float dist, vec3 dirWorld, float far, vec3 skyCol, bool u
     {
         // XE Common.fx fogColour: fog = (dist > nearViewRange) ? exp :
         // fogMWScalar. Inside Morrowind's own draw range MGE fogs with
-        // vanilla LINEAR fog whose range adjustFog fits to the exp curve
+        // vanilla linear fog whose range adjustFog fits to the exp curve
         // at 1280 units and at min(fogEnd, nearViewRange). exp(-x) is
-        // convex, so this chord sits ABOVE it - MGE keeps mid-range
-        // objects considerably more readable in dense weather (Foggy at
-        // 4000u: ~60% fogged vs ~83% pure-exp); running the exp curve at
-        // all ranges washes out close objects.
+        // convex, so this chord sits above it and keeps mid-range objects
+        // considerably more readable in dense weather (Foggy at 4000u:
+        // ~60% fogged vs ~83% pure-exp). Running the exp curve at all
+        // ranges washes out close objects.
         float farIntercept = min(fogEnd * mgeCell, mgeNearViewRange);
         float eN = exp(-(mgeNearFitDist - fogExpStart) / fogExpDivisor);
         float eF = exp(-(farIntercept - fogExpStart) / fogExpDivisor);
@@ -464,30 +455,29 @@ vec4 mgeFogColourWorld(float dist, vec3 dirWorld, float far, vec3 skyCol, bool u
 
     float fogdist = clamp(mgeInscatterDistScale * x, 0.0, 1.0);
 
-    // Bad-weather / base colour invariant: fog on
-    // geometry must be exactly as solid as - and never more than - the
-    // general sky fog at that elevation. Implemented by converging to the
-    // SKY'S OWN colour at this direction (the same raise-aware band blend
-    // mgeFogColourSky uses) instead of XE's flat palette colour: at full
-    // saturation geometry EQUALS the sky behind it at any elevation, so a
-    // massif can never read more fogged than its backdrop. At the horizon
-    // (h=0) this is byte-identical to the classic (1-fog)*fogColour.
-    // Convergence base: prefer the REAL rendered sky behind this pixel
+    // Bad-weather base colour invariant: fog on geometry must be exactly
+    // as solid as the general sky fog at that elevation, never more.
+    // Implemented by converging to the sky's own colour at this direction
+    // (the same raise-aware band blend mgeFogColourSky uses) instead of
+    // XE's flat palette colour: at full saturation geometry equals the
+    // sky behind it at any elevation, so a massif can never read more
+    // fogged than its backdrop. At the horizon (h=0) this is
+    // byte-identical to the classic (1-fog)*fogColour.
+    // Convergence base: prefer the real rendered sky behind this pixel
     // (sky-blending RTT sample, passed in by fog.glsl; a=0 when absent or
-    // in a reflection pass). The analytic dome proxy overshot at STEEP
-    // elevations - h -> 1 converges to the weather ZENITH palette (Foggy:
-    // ~231,241,247) while the visible sky there is the darker cloud layer,
-    // whitening tall silhouettes.
+    // in a reflection pass). The analytic dome proxy overshoots at steep
+    // elevations: h -> 1 converges to the weather zenith palette (Foggy:
+    // ~231,241,247) while the visible sky there is the darker cloud
+    // layer, whitening tall silhouettes.
     float hSky = mgeSkyFogH(dirWorld.z);
     vec3 zenith = (mgeWeatherUniforms > 0.5) ? mgeSkyColor : gl_Fog.color.xyz;
     vec3 convBase = mix(gl_Fog.color.xyz, zenith, hSky);
-    // The real-sky sample carries the CLOUD IMAGE - at partial fog on near
+    // The real-sky sample carries the cloud image; at partial fog on near
     // geometry it would paint a screen-fixed cloud pattern onto walls.
-    // Physically the sky image belongs in the
-    // convergence only when the fragment is nearly SATURATED (a silhouette
-    // against the sky), so it is weighted in by saturation: light haze =
-    // flat colour (pattern-free), full fog = exact sky pixel (invariant
-    // intact where it matters).
+    // The sky image belongs in the convergence only when the fragment is
+    // nearly saturated (a silhouette against the sky), so it is weighted
+    // in by saturation: light haze converges to the flat colour
+    // (pattern-free), full fog to the exact sky pixel.
     if (skyBehind.a > 0.5)
         convBase = mix(convBase, skyBehind.rgb, smoothstep(0.55, 0.92, 1.0 - fog));
     vec3 rgb = (1.0 - fog) * convBase;
@@ -496,13 +486,13 @@ vec4 mgeFogColourWorld(float dist, vec3 dirWorld, float far, vec3 skyCol, bool u
     if (nice > 0.001)
         rgb = mix(rgb, mgeScatter(dirWorld, fogdist, skyCol), nice);
 
-    // Horizon seal: with the 2020-era fog scale the inscatter distance caps
-    // at 0.224*4 = 0.896 at the view edge, so the farthest water/land only
-    // reached ~97% of the sky dome's colour even with an asymptotic guard —
-    // a persistent dark line where the sea meets the sky. Instead, blend the
-    // final stretch of the view distance EXACTLY to the analytic dome colour
-    // for this direction (scatter at fogdist=1 / palette fog in bad weather)
-    // — the same colour the sky shows behind the far plane, by construction.
+    // Horizon seal: with the 2020-era fog scale the inscatter distance
+    // caps at 0.224*4 = 0.896 at the view edge, so the farthest water/land
+    // only reaches ~97% of the sky dome's colour, leaving a dark line
+    // where the sea meets the sky. Blend the final stretch of the view
+    // distance to the analytic dome colour for this direction (scatter at
+    // fogdist=1, or palette fog in bad weather), which is the colour the
+    // sky shows behind the far plane by construction.
     float seal = smoothstep(0.88, 0.995, dist / far);
     if (seal > 0.001)
     {
@@ -547,17 +537,17 @@ vec3 mgeFogColourSky(vec3 dirWorld, vec3 zenithCol, vec3 skyCol)
     vec3 base = mix(gl_Fog.color.xyz, zenithCol, h);
     float nice = mgeGetNiceWeather();
     // Fog-disabled cameras (the underwater refraction RTT, local map,
-    // previews) render the ABOVE-water world by definition, so they always
-    // paint the above-water sky: without this, a submerged viewer's
+    // previews) render the above-water world by definition, so they always
+    // paint the above-water sky. Without this, a submerged viewer's
     // refraction RTT skips the scatter and blends its horizon toward the
-    // global gl_Fog.color - the underwater murk - drawing a dark band
+    // global gl_Fog.color (the underwater murk), drawing a dark band
     // across the above-water sky seen through the surface.
     if (nice > 0.001 && (mgeCamAboveWater() || gl_Fog.start > 1000000.0))
         return mix(base, mgeScatter(dirWorld, 1.0, skyCol), nice);
     return base;
 }
 
-// Ordered 4x4 dither from XE Mod Sky.fx SkyPS — kills sky gradient banding.
+// Ordered 4x4 dither from XE Mod Sky.fx SkyPS; removes sky gradient banding.
 float mgeSkyDither(vec2 fragCoord)
 {
     const float d[16] = float[16](

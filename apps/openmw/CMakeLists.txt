@@ -161,9 +161,8 @@ if(BUILD_OPENMW)
         set_target_properties(openmw PROPERTIES ENABLE_EXPORTS ON)
     endif()
 
-    # MSVC: renderingmanager.obj's debug info trips LNK1103 ("debugging
-    # information corrupt") on Release links; the shipping build needs no
-    # PDB anyway. Set here (not hand-edited in the generated vcxproj) so
+    # MSVC: renderingmanager.obj's debug info trips LNK1103 on Release links,
+    # so disable linker debug info for the Release configuration. Set here so
     # CMake regeneration keeps it.
     if (MSVC)
         set_target_properties(openmw PROPERTIES LINK_FLAGS_RELEASE "/DEBUG:NONE")

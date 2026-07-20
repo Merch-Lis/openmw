@@ -313,10 +313,10 @@ namespace MWRender
         resourceSystem->getSceneManager()->setSupportsNormalsRT(mPostProcessor->getSupportsNormalsRT());
         resourceSystem->getSceneManager()->setWeatherParticleOcclusion(Settings::shaders().mWeatherParticleOcclusion);
 
-        // NOTE: must stay after PostProcessor construction - the loader
+        // NOTE: must stay after PostProcessor construction. The loader
         // threads compile object shaders, which need the postprocessor's
         // global defines (distorionRTRatio) and reserved texture units.
-        // mge-exact: session-resident distant statics. Loaded ONCE here, held
+        // mge-exact: session-resident distant statics. Loaded once here, held
         // for the process lifetime; save loads never touch them. The root is
         // MSOC-exempt (no occlusion callbacks) and toggles with the sky for
         // interiors. While active, paged distant chunks are suppressed.
@@ -333,8 +333,9 @@ namespace MWRender
                 // the resident layer overlaps stock rendering out to the
                 // viewing distance; identical surfaces at identical depths
                 // z-fight, and the copies shade differently (no per-light
-                // state on the backdrop) - flicker around light sources.
-                // Bias the whole layer back so it always loses depth ties.
+                // state on the backdrop), which flickers around light
+                // sources. Bias the whole layer back so it always loses
+                // depth ties.
                 mDistantStaticsRoot->getOrCreateStateSet()->setAttributeAndModes(
                     new osg::PolygonOffset(1.f, 4.f), osg::StateAttribute::ON);
                 if (mObjectPaging->loadDistantStaticsResident(dsDir, mDistantStaticsRoot.get()) > 0)
@@ -392,16 +393,16 @@ namespace MWRender
         mMgeSkyColorUniform = new osg::Uniform("mgeSkyColor", osg::Vec3f(0.5f, 0.5f, 0.5f));
         // (weather Fog Ratio ff, weather Fog Offset fo, isExterior, isDay)
         mMgeFogParamsUniform = new osg::Uniform("mgeFogParams", osg::Vec4f(1.f, 0.f, 1.f, 1.f));
-        // Weather-transition endpoints. Shaders derive fog ranges at BOTH
+        // Weather-transition endpoints. Shaders derive fog ranges at both
         // endpoint weathers and lerp the derived values, so nonlinear terms
         // don't compress the visual change into a fraction of the
         // transition. Cur = (ff, fo, valid, 0); Next = (ff, fo, blend, 0).
         mMgeFogParamsCurUniform = new osg::Uniform("mgeFogParamsCur", osg::Vec4f(-1.f, 0.f, 0.f, 0.f));
         mMgeFogParamsNextUniform = new osg::Uniform("mgeFogParamsNext", osg::Vec4f(-1.f, 0.f, 0.f, 0.f));
-        // World-space sun direction, valid in EVERY render pass. The MGE
-        // scatter previously derived the sun from the per-pass light list,
-        // which is degenerate in the water-reflection RTT's sky rendering
-        // (normalize(0) -> NaN -> black reflected sky).
+        // World-space sun direction, valid in every render pass. Deriving
+        // the sun from the per-pass light list instead is degenerate in the
+        // water-reflection RTT's sky rendering (normalize(0) -> NaN -> black
+        // reflected sky).
         mMgeSunDirUniform = new osg::Uniform("mgeSunDir", osg::Vec3f(0.f, 0.f, 0.f));
         // XE Sky Variations: daily scattering override fed from
         // Lua (core.weather.setMgeScattering); off = shader preset consts.
@@ -425,8 +426,9 @@ namespace MWRender
         mRootNode->getOrCreateStateSet()->addUniform(mClampActorsGateUniform);
         // explicit 0 default for the actor-identity uniform: actors and world
         // objects share shader programs, and GL retains a program's last-set
-        // uniform value - without a root-level default, world geometry drawn
-        // after an actor inherited the actor's 1 (visible terrain leak)
+        // uniform value. Without a root-level default, world geometry drawn
+        // after an actor inherits the actor's 1 and the clamp leaks onto
+        // terrain.
         mRootNode->getOrCreateStateSet()->addUniform(new osg::Uniform("uClampLightingActor", 0.f));
         // MGE fog envelope from settings; the Distant Land Generator app is
         // the intended editor (game closed), so ctor-time read suffices
@@ -496,17 +498,14 @@ namespace MWRender
         // let background loading thread finish before we delete anything else
         mWorkQueue = nullptr;
 
-        // INTENTIONAL LEAK: the resident distant-statics world
-        // is ~15 GB of small OSG allocations; destructing it frees millions
-        // of heap blocks and stalled quit for minutes - the "freeze on exit"
-        // reports. Symbolized freeze dumps show the main thread GRINDING in
-        // RtlpFreeHeap/RtlpCoalesceFreeBlocks/RtlpInsertFreeBlock under
-        // Engine::~Engine -> scene-graph destructors: not deadlocked, just
-        // O(millions) of frees. The process is exiting; the OS reclaims the
-        // whole heap instantly. One extra ref keeps the subtree destructor
-        // from ever running. ObjectPaging's worker threads still join
-        // cleanly in its own destructor - only memory destruction is
-        // skipped, no state is lost (saves never depend on the bake).
+        // Intentional leak: the resident distant-statics world is ~15 GB of
+        // small OSG allocations, and destructing it frees millions of heap
+        // blocks, stalling quit for minutes inside the scene-graph
+        // destructors. The process is exiting anyway and the OS reclaims the
+        // whole heap instantly, so one extra ref keeps the subtree destructor
+        // from ever running. ObjectPaging's worker threads still join cleanly
+        // in its own destructor; only memory destruction is skipped, no state
+        // is lost (saves never depend on the bake).
         if (mDistantStaticsRoot)
             mDistantStaticsRoot->ref();
     }

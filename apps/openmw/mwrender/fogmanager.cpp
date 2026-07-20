@@ -69,9 +69,9 @@ namespace MWRender
             }
             mUnderwaterFogStart = std::min(viewDistance, 7168.f) * (1 - underwaterFog);
             mUnderwaterFogEnd = std::min(viewDistance, 7168.f);
-            // MGE XE below-water envelope (distantinit.cpp defaults -0.5/0.3
-            // cells): much denser than the vanilla-derived range, and the
-            // curve the underwater surface/reflection haze converges with.
+            // MGE XE underwater fog range (distantinit.cpp defaults -0.5/0.3
+            // cells). Denser than the vanilla-derived range above, and the
+            // underwater surface/reflection haze converges to the same curve.
             const float uwEndCells = Settings::fog().mMgeUnderwaterFogEndCells;
             if (uwEndCells != 0.f)
             {

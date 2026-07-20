@@ -2223,7 +2223,7 @@ namespace MWWorld
             cellStore.forEachConst([&refStates](const MWWorld::ConstPtr& ptr) {
                 const ESM::RefNum refNum = ptr.getCellRef().getRefNum();
                 if (!refNum.hasContentFile())
-                    return true; // dynamically placed - never part of the bake
+                    return true; // dynamically placed, never part of the bake
                 MWRender::ObjectPaging::RefStateOverride& state = refStates[refNum];
                 state.mEnabled = ptr.getRefData().isEnabled() && !ptr.getBase()->isDeleted();
                 state.mMoved = true;

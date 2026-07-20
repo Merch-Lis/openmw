@@ -913,18 +913,19 @@ namespace MWWorld
             float niceWeather = niceOf(mCurrentWeather);
             if (mNextWeather >= 0)
             {
-                // mTransitionFactor counts DOWN from 1 to 0 as the transition
-                // progresses; the engine's own blend uses (1 - factor) — see
-                // calculateWeatherResult. Raw factor here snapped the scatter
-                // to the next weather the instant a transition began.
+                // mTransitionFactor counts down from 1 to 0 as the transition
+                // progresses; the engine's own blend uses (1 - factor), see
+                // calculateWeatherResult. Using the raw factor would snap the
+                // scatter to the next weather the instant a transition begins.
                 niceWeather = lerp(niceWeather, niceOf(mNextWeather), 1.f - mTransitionFactor);
             }
             // MGE squares the blended value (distantland.cpp adjustFog:
             // niceWeather *= niceWeather)
             niceWeather *= niceWeather;
-            // Endpoint fog params + blend: shaders lerp DERIVED fog ranges
-            // between the endpoint weathers, so knee-shaped terms don't
-            // compress the visible change into a fraction of the transition.
+            // Endpoint fog params + blend: the shaders derive fog ranges at
+            // both endpoint weathers and lerp the derived values, so nonlinear
+            // terms don't compress the visible change into a fraction of the
+            // transition.
             float ffCur = mWeatherSettings[mCurrentWeather].mDL.FogFactor;
             float foCur = mWeatherSettings[mCurrentWeather].mDL.FogOffset / 100.0f;
             float ffNext = ffCur, foNext = foCur, fogBlend = 0.f;

@@ -689,13 +689,12 @@ namespace MWRender
         mOcclusionQueryVisiblePixels = createOcclusionQueryNode(queryNode, true);
         mOcclusionQueryTotalPixels = createOcclusionQueryNode(queryNode, false);
 
-        // MGE XE parity: the ported Sunshafts shader declares
-        // disableSunglare - MGE suppresses the engine's sun flash + glare
-        // while it runs (the shader's own disc/rays replace them). The flash
-        // billboard renders depth-test-off in a late bin and shows through
-        // partially-occluding geometry (occlusion-query fade), which the
-        // MGE look never had. The glare quad is additionally zeroed in
-        // sky.frag paintSunglare.
+        // MGE XE parity: the ported Sunshafts shader declares disableSunglare,
+        // so the engine's sun flash and glare are suppressed while it runs and
+        // the shader's own disc/rays replace them. The flash billboard renders
+        // depth-test-off in a late bin and would show through partially
+        // occluding geometry (occlusion-query fade), which MGE never had.
+        // The glare quad is additionally zeroed in sky.frag paintSunglare.
         // createSunFlash(imageManager);
         createSunGlare();
     }

@@ -243,7 +243,8 @@ bool OMW::Engine::frame(unsigned frameNumber, float frametime)
             mStateManager->update(frametime);
         }
 
-        // v7: distant-land generation mode (--generate-distant-land)
+        // Distant-land generation mode (--generate-distant-land): run one
+        // generation pass once the session is up, then quit.
         if (mGenerateDistantLand && !mGenerateDistantLandDone
             && mStateManager->getState() == MWBase::StateManager::State_Running)
         {
@@ -1148,11 +1149,11 @@ void OMW::Engine::setGenerateDistantLand(bool generate)
     MWRender::ObjectPaging::setGenerationMode(generate);
 }
 
-// v7 distant-land pregeneration: sweep a lattice of viewpoints across the
-// exterior world driving the REAL terrain-preload pipeline, so every chunk
-// is built and disk-cached with exactly the id/LOD/content a live session
-// would request. Interruptible and resumable: already-written chunks are
-// served from disk on the next run instead of being rebuilt.
+// Distant-land pregeneration: sweep a lattice of viewpoints across the
+// exterior world through the regular terrain-preload pipeline, so every
+// chunk is built and disk-cached with exactly the id/LOD/content a live
+// session would request. Interruptible and resumable: already-written
+// chunks are served from disk on the next run instead of being rebuilt.
 void OMW::Engine::generateDistantLand()
 {
     const MWWorld::Store<ESM::Cell>& cells = mWorld->getStore().get<ESM::Cell>();

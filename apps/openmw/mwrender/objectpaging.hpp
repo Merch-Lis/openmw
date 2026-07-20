@@ -68,26 +68,26 @@ namespace MWRender
 
         void setOcclusionCuller(SceneUtil::OcclusionCuller* culler, unsigned int maxTriangles);
 
-        // Chunk disk cache (patch v6)
+        // Chunk disk cache
         std::filesystem::path diskCachePath(const ChunkId& id);
         osg::ref_ptr<osg::Node> readCachedChunk(
             const std::filesystem::path& file, bool compile, bool raw = false, bool attachOcclusion = true);
         void writeCachedChunk(osg::Node* node, const std::filesystem::path& file, bool pruneSiblingVariants = true);
-        // v6.5: deferred coalescing background writes - a chunk rebuilt
-        // repeatedly during script disable-storms produces ONE final write,
-        // off the chunk-delivery path.
+        // Deferred coalescing background writes: a chunk rebuilt repeatedly
+        // during script disable-storms produces one final write, off the
+        // chunk-delivery path.
         void enqueueCachedChunkWrite(osg::Node* node, const std::filesystem::path& file);
-        // v7: block until every queued chunk write has hit disk (generation
+        // Block until every queued chunk write has hit disk (generation
         // mode calls this between lattice points and before exiting).
         void drainWriteQueue();
-        // v7: --generate-distant-land runs may supersede a mismatched
-        // generation (MGE regenerate semantics); normal sessions go read-only.
+        // --generate-distant-land runs may supersede a mismatched generation
+        // (MGE regenerate semantics); normal sessions go read-only.
         static void setGenerationMode(bool enabled) { sGenerationMode = enabled; }
-        // v9: the standalone generator tool injects content files + ESM
+        // The standalone generator tool injects content files + ESM
         // versions (no MWBase::World exists there).
         static void setStandaloneContext(std::vector<std::string> contentFiles, std::vector<int> esmVersions);
-        // v11.1: chunk-write failures (disk full etc.) are counted, not
-        // swallowed - generation must not report success when writes died.
+        // Chunk-write failures (disk full etc.) are counted, not swallowed;
+        // generation must not report success when writes failed.
         unsigned int getWriteFailureCount() const { return mWriteFailures.load(); }
 
         // mge-exact: single-layer distant statics. One merged, class-grouped
@@ -104,7 +104,7 @@ namespace MWRender
         static constexpr int sSupercellSize = 4; // cells per side
         // returns the state hash of the supercell's refs; writes the mesh
         // file + .state sidecar unless the existing sidecar already matches
-        // (that skip IS the tier-2 incremental refresh).
+        // (that skip is the tier-2 incremental refresh).
         std::uint64_t generateSupercell(const osg::Vec2i& startCell, const std::filesystem::path& outDir,
             const RefStateMap& refStates, bool& outWritten);
         // phase 2: load every supercell once, attach progressively under
@@ -143,11 +143,11 @@ namespace MWRender
         std::filesystem::path mResidentDir;
         std::atomic<bool> mResidentRefreshActive{ false };
 
-        // v7.1: ALL non-activeGrid chunk production (disk read or live
-        // build) is asynchronous: requesters get an instant placeholder
-        // Group whose content swaps in via update callback when a producer
-        // thread finishes. The render path never does IO or merging, and
-        // the loading screen no longer gates on distant object chunks.
+        // All non-activeGrid chunk production (disk read or live build) is
+        // asynchronous: requesters get an instant placeholder Group whose
+        // content swaps in via update callback when a producer thread
+        // finishes. The render path never does IO or merging, and the
+        // loading screen does not gate on distant object chunks.
         class ChunkSwapCallback;
         struct PendingChunkLoad
         {
@@ -164,11 +164,11 @@ namespace MWRender
         Resource::SceneManager* mSceneManager;
         std::filesystem::path mDiskCacheDir;
         std::once_flag mDiskCacheInit;
-        // v7: generation manifest mismatch -> serve but never write
+        // set when the generation manifest mismatches: serve but never write
         bool mDiskCacheReadOnly = false;
         static inline bool sGenerationMode = false;
 
-        // v6.5 write queue: keyed by chunk coordinate prefix (filename minus
+        // Write queue: keyed by chunk coordinate prefix (filename minus
         // disabled-state salt) so a newer state variant supersedes a queued
         // older one. Guarded by mWriteQueueMutex.
         struct PendingChunkWrite
@@ -186,18 +186,18 @@ namespace MWRender
         bool mWriteBusy = false;
         std::atomic<unsigned int> mWriteFailures{ 0 };
 
-        // v12: template-level distant mesh simplification cache. One
-        // decimated variant per (template, ratio), shared by every chunk
-        // that merges the template. The entry pins the ORIGINAL template
-        // (pointer identity stays valid and unique across resource-cache
-        // clears) alongside the simplified copy.
+        // Template-level distant mesh simplification cache. One decimated
+        // variant per (template, ratio), shared by every chunk that merges
+        // the template. The entry pins the original template alongside the
+        // simplified copy, so pointer identity stays valid and unique
+        // across resource-cache clears.
         std::mutex mSimplifiedTemplatesMutex;
         std::map<std::pair<const osg::Node*, float>, std::pair<osg::ref_ptr<const osg::Node>, osg::ref_ptr<osg::Node>>>
             mSimplifiedTemplates;
         const osg::Node* getSimplifiedTemplate(
             const osg::Node* node, float ratio, Resource::TemplateMultiRef& templateRefs);
 
-        // v7.1 async chunk production
+        // async chunk production
         void enqueueChunkLoad(PendingChunkLoad&& job);
         void chunkLoadWorker();
         std::mutex mLoadQueueMutex;

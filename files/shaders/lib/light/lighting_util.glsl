@@ -161,7 +161,7 @@ void clampLightingResult(inout vec3 lighting)
 }
 
 // MGE XE-style per-object tonemap: polynomial maps [0, 2.2] -> [0, 1].
-// Midtones nearly untouched (0.5 -> 0.506), highlights gracefully compressed.
+// Midtones nearly untouched (0.5 -> 0.506), highlights compressed.
 vec3 perObjectTonemap(vec3 c)
 {
     c = clamp(c, 0.0, 2.2);
