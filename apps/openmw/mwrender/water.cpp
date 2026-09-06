@@ -10,6 +10,7 @@
 #include <osg/Group>
 #include <osg/Material>
 #include <osg/PositionAttitudeTransform>
+#include <osg/Texture3D>
 #include <osg/ViewportIndexed>
 
 #include <osgUtil/CullVisitor>
@@ -59,8 +60,9 @@ namespace MWRender
         {
         public:
             /// @param cullPlane The culling plane (in world space).
-            PlaneCullCallback(const osg::Plane* cullPlane)
+            PlaneCullCallback(const osg::Plane* cullPlane, const float* clipMargin)
                 : mCullPlane(cullPlane)
+                , mClipMargin(clipMargin)
             {
             }
 
@@ -76,6 +78,13 @@ namespace MWRender
                 if (mCullPlane->intersect(osg::BoundingSphere(osg::Vec3d(0, 0, eyePoint.z()), 0)) > 0)
                     plane.flip();
 
+                // Displaced wave geometry: keep content the margin's depth past
+                // the plane (enlarges the kept half-space whichever way the
+                // plane faces) - XE's clip allowance, renderwater.cpp:36-40,
+                // expressed as culling slack instead of a moved mirror plane.
+                if (*mClipMargin != 0.f)
+                    plane = osg::Plane(plane.getNormal(), plane[3] + *mClipMargin);
+
                 cv->getProjectionCullingStack().back().getFrustum().add(plane);
 
                 traverse(node, cv);
@@ -86,6 +95,7 @@ namespace MWRender
 
         private:
             const osg::Plane* mCullPlane;
+            const float* mClipMargin;
         };
 
         class FlipCallback : public SceneUtil::NodeCallback<FlipCallback, osg::Node*, osgUtil::CullVisitor*>
@@ -133,7 +143,7 @@ namespace MWRender
     public:
         ClipCullNode()
         {
-            addCullCallback(new PlaneCullCallback(&mPlane));
+            addCullCallback(new PlaneCullCallback(&mPlane, &mClipMargin));
 
             mClipNodeTransform = new osg::Group;
             mClipNodeTransform->addCullCallback(new FlipCallback(&mPlane));
@@ -149,19 +159,39 @@ namespace MWRender
             if (plane == mPlane)
                 return;
             mPlane = plane;
+            applyClipPlane();
+        }
 
+        /// Displaced wave geometry: hardware-clip this many units past the
+        /// plane. The FlipCallback's mirror transform is untouched (the
+        /// mirror stays at the true water level - lowering it would bend the
+        /// reflection, the trap XE's D3D clip-plane move does not have);
+        /// only the GL clip plane and the frustum cull gain slack, so the
+        /// reflection RTT keeps content between a wave trough and the plane.
+        void setClipMargin(float margin)
+        {
+            if (margin == mClipMargin)
+                return;
+            mClipMargin = margin;
+            if (!mClipNode->getClipPlaneList().empty())
+                applyClipPlane();
+        }
+
+    private:
+        void applyClipPlane()
+        {
             mClipNode->getClipPlaneList().clear();
-            mClipNode->addClipPlane(
-                new osg::ClipPlane(0, osg::Plane(mPlane.getNormal(), 0))); // mPlane.d() applied in FlipCallback
+            mClipNode->addClipPlane(new osg::ClipPlane(
+                0, osg::Plane(mPlane.getNormal(), mClipMargin))); // mPlane.d() applied in FlipCallback
             mClipNode->setStateSetModes(*getOrCreateStateSet(), osg::StateAttribute::ON);
             mClipNode->setCullingActive(false);
         }
 
-    private:
         osg::ref_ptr<osg::Group> mClipNodeTransform;
         osg::ref_ptr<osg::ClipNode> mClipNode;
 
         osg::Plane mPlane;
+        float mClipMargin = 0.f;
     };
 
     /// This callback on the Camera has the effect of a RELATIVE_RF_INHERIT_VIEWPOINT transform mode (which does not
@@ -390,6 +420,12 @@ namespace MWRender
             mClipCullNode->setPlane(osg::Plane(osg::Vec3d(0, 0, 1), osg::Vec3d(0, 0, waterLevel)));
         }
 
+        /// Displaced wave geometry: keep reflected content down to a wave
+        /// trough below the plane (XE's 0.5*waveHeight clip allowance,
+        /// renderwater.cpp:36-40). The mirror matrix above is untouched -
+        /// only clipping gains slack.
+        void setClipMargin(float margin) { mClipCullNode->setClipMargin(margin); }
+
         void setScene(osg::Node* scene)
         {
             if (mScene)
@@ -471,7 +507,40 @@ namespace MWRender
     {
         mSimulation = std::make_unique<RippleSimulation>(mSceneRoot, resourceSystem);
 
-        mWaterGeom = SceneUtil::createWaterGeometry(Constants::CellSizeInUnits * 150, 40, 900);
+        // Displaced wave geometry (Full tier, Wonders of Water layer):
+        // swap the flat sheet for the camera-centred radial mesh that the
+        // vertex stage displaces. Requires the water shader (the simple
+        // path has no vertex program to displace anything). Density 384x120
+        // is measured, not XE's 150x120 - our wave field is an order of
+        // magnitude finer than XE's (sim_water_displacement.py, WFR repo,
+        // (5000u) is bounded by this mesh's measured carrying reach.
+        mDisplacedGeometry = Settings::water().mDisplacedWaveGeometry && Settings::water().mShader;
+
+        // The local map's simple water stays the flat stock sheet in either
+        // mode, so build it from stock geometry unconditionally.
+        osg::ref_ptr<osg::Geometry> flatGeom
+            = SceneUtil::createWaterGeometry(Constants::CellSizeInUnits * 150, 40, 900);
+
+        if (mDisplacedGeometry)
+        {
+            mWaterGeom = SceneUtil::createRadialWaterGeometry(384, 120, 9600.f, 500000.f);
+            // height map over 12288 u around the camera, baked by the
+            // renderer (it owns the terrain), sampled by water.vert to fade
+            // displacement over shallow and dry ground. 12288/2 = 6144 u of
+            // coverage radius > the 5000 u displacement window, so every
+            // displaced vertex is always inside the map.
+            mShoreImage = new osg::Image;
+            mShoreImage->allocateImage(64, 64, 1, GL_RED, GL_FLOAT);
+            std::fill_n(reinterpret_cast<float*>(mShoreImage->data()), 64 * 64, -2048.f);
+            mShoreTex = new osg::Texture2D(mShoreImage);
+            mShoreTex->setInternalFormat(GL_R32F);
+            mShoreTex->setWrap(osg::Texture::WRAP_S, osg::Texture::CLAMP_TO_EDGE);
+            mShoreTex->setWrap(osg::Texture::WRAP_T, osg::Texture::CLAMP_TO_EDGE);
+            mShoreTex->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR);
+            mShoreTex->setFilter(osg::Texture::MAG_FILTER, osg::Texture::LINEAR);
+        }
+        else
+            mWaterGeom = flatGeom;
         mWaterGeom->setDrawCallback(new DepthClampCallback);
         mWaterGeom->setNodeMask(Mask_Water);
         mWaterGeom->setDataVariance(osg::Object::STATIC);
@@ -483,7 +552,7 @@ namespace MWRender
         mWaterNode->addCullCallback(new FudgeCallback);
 
         // simple water fallback for the local map
-        osg::ref_ptr<osg::Geometry> geom2(osg::clone(mWaterGeom.get(), osg::CopyOp::DEEP_COPY_NODES));
+        osg::ref_ptr<osg::Geometry> geom2(osg::clone(flatGeom.get(), osg::CopyOp::DEEP_COPY_NODES));
         createSimpleWaterStateSet(geom2, Fallback::Map::getFloat("Water_Map_Alpha"));
         geom2->setNodeMask(Mask_SimpleWater);
         geom2->setName("Simple Water Geometry");
@@ -556,6 +625,16 @@ namespace MWRender
 
             mReflection = new Reflection(rttSize, mInterior);
             mReflection->setWaterLevel(mTop);
+            if (mDisplacedGeometry)
+            {
+                // Keep reflected content down to a wave trough below the
+                // plane. 25 = XE's exact allowance (0.5 x waveHeight at the
+                // ini's 50). The first shipment used 55 (the procedural storm
+                // half-extent) and the swim test showed why XE keeps
+                // this tight: at grazing angles crest faces reflect whatever
+                // the margin admits, and 55 u of below-surface content read
+                mReflection->setClipMargin(25.f);
+            }
             mReflection->setScene(mSceneRoot);
             if (mCullCallback)
                 mReflection->addCullCallback(mCullCallback);
@@ -637,13 +716,15 @@ namespace MWRender
     {
     public:
         ShaderWaterStateSetUpdater(Water* water, Reflection* reflection, Refraction* refraction, Ripples* ripples,
-            osg::ref_ptr<osg::Program> program, osg::ref_ptr<osg::Texture2D> normalMap)
+            osg::ref_ptr<osg::Program> program, osg::ref_ptr<osg::Texture2D> normalMap,
+            osg::ref_ptr<osg::Texture3D> waveVolume)
             : mWater(water)
             , mReflection(reflection)
             , mRefraction(refraction)
             , mRipples(ripples)
             , mProgram(std::move(program))
             , mNormalMap(std::move(normalMap))
+            , mWaveVolume(std::move(waveVolume))
         {
         }
 
@@ -674,6 +755,29 @@ namespace MWRender
                 stateset->addUniform(new osg::Uniform("rippleMap", 4));
             }
             stateset->addUniform(new osg::Uniform("nodePosition", osg::Vec3f(mWater->getPosition())));
+            // Displaced wave geometry marker for the water shaders. Fed only
+            // when the radial mesh is actually live, and only this fork has
+            // the code to feed it - a stock exe never declares it, GLSL
+            // reads 0, and water.vert's displacement multiplies out (the
+            // mgeWeatherUniforms pattern; RP byte-identity rides this).
+            stateset->addUniform(
+                new osg::Uniform("mgeWaterDisplace", mWater->isDisplacedGeometry() ? 1.f : 0.f));
+            // the displacement + shading field. 0 when the asset is absent -
+            // the shader then runs the procedural field, never black water.
+            stateset->addUniform(new osg::Uniform("mgeWaterXeField",
+                (mWater->isDisplacedGeometry() && mWaveVolume) ? 1.f : 0.f));
+            if (mWaveVolume)
+            {
+                stateset->addUniform(new osg::Uniform("mgeWave3d", 5));
+                stateset->setTextureAttributeAndModes(5, mWaveVolume, osg::StateAttribute::ON);
+            }
+            if (mWater->getShoreImage())
+            {
+                stateset->addUniform(new osg::Uniform("mgeShoreMap", 6));
+                stateset->addUniform(new osg::Uniform("mgeShoreParams", mWater->getShoreMapParams()));
+                stateset->setTextureAttributeAndModes(6, mWater->getShoreTexture(),
+                                                      osg::StateAttribute::ON);
+            }
         }
 
         void apply(osg::StateSet* stateset, osg::NodeVisitor* nv) override
@@ -691,6 +795,8 @@ namespace MWRender
                 stateset->setTextureAttributeAndModes(4, mRipples->getColorTexture(), osg::StateAttribute::ON);
             }
             stateset->getUniform("nodePosition")->set(osg::Vec3f(mWater->getPosition()));
+            if (mWater->getShoreImage())
+                stateset->getUniform("mgeShoreParams")->set(mWater->getShoreMapParams());
         }
 
     private:
@@ -700,6 +806,7 @@ namespace MWRender
         Ripples* mRipples;
         osg::ref_ptr<osg::Program> mProgram;
         osg::ref_ptr<osg::Texture2D> mNormalMap;
+        osg::ref_ptr<osg::Texture3D> mWaveVolume;
     };
 
     void Water::createShaderWaterStateSet(osg::Node* node)
@@ -726,11 +833,46 @@ namespace MWRender
         normalMap->setWrap(osg::Texture::WRAP_T, osg::Texture::REPEAT);
         mResourceSystem->getSceneManager()->applyFilterSettings(normalMap);
 
+        // XE's own water_NRM volume texture - a = the wave heights the
+        // vertex stage displaces, rg = the baked shading normals (which
+        // never scale with wave height; XE's storm trick). Loaded only in
+        // displaced mode; if the asset is absent or not a volume, the
+        // shader's mgeWaterXeField uniform stays 0 and the procedural
+        // field serves instead - never a black-water fallback.
+        osg::ref_ptr<osg::Texture3D> waveVolume;
+        if (mDisplacedGeometry)
+        {
+            constexpr VFS::Path::NormalizedView waveImage("textures/mge/water_nrm.dds");
+            try
+            {
+                osg::ref_ptr<osg::Image> img = mResourceSystem->getImageManager()->getImage(waveImage);
+                if (img && img->r() > 1)
+                {
+                    waveVolume = new osg::Texture3D(img);
+                    waveVolume->setWrap(osg::Texture::WRAP_S, osg::Texture::REPEAT);
+                    waveVolume->setWrap(osg::Texture::WRAP_T, osg::Texture::REPEAT);
+                    waveVolume->setWrap(osg::Texture::WRAP_R, osg::Texture::REPEAT);
+                    // XE Common.fx sampWater3d: linear min/mag, NO mip
+                    waveVolume->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR);
+                    waveVolume->setFilter(osg::Texture::MAG_FILTER, osg::Texture::LINEAR);
+                }
+                else
+                    Log(Debug::Warning) << "Water: textures/mge/water_nrm.dds is not a volume; "
+                                           "XE wave field disabled, procedural field in use";
+            }
+            catch (const std::exception& e)
+            {
+                Log(Debug::Warning) << "Water: XE wave volume not loaded (" << e.what()
+                                    << "); procedural field in use";
+            }
+        }
+
         mRainSettingsUpdater = new RainSettingsUpdater();
         node->setUpdateCallback(mRainSettingsUpdater);
 
         mShaderWaterStateSetUpdater = new ShaderWaterStateSetUpdater(
-            this, mReflection, mRefraction, mRipples, std::move(program), std::move(normalMap));
+            this, mReflection, mRefraction, mRipples, std::move(program), std::move(normalMap),
+            std::move(waveVolume));
         node->addCullCallback(mShaderWaterStateSetUpdater);
     }
 
@@ -824,6 +966,22 @@ namespace MWRender
     {
         if (mRainSettingsUpdater)
             mRainSettingsUpdater->setRainIntensity(rainIntensity);
+    }
+
+    void Water::setCameraPosition(const osg::Vec3f& cameraPos)
+    {
+        if (!mDisplacedGeometry)
+            return;
+        // XE recentres the radial mesh on the eye every frame via the world
+        // transform (renderwater.cpp:441). The mesh is static in its own
+        // frame; only this node position moves. The nodePosition uniform
+        // tracks it per frame already (ShaderWaterStateSetUpdater::apply),
+        // so worldPos in the shaders - and with it the world-anchored wave
+        // field - stays correct with no shader-side change.
+        osg::Vec3f pos = mWaterNode->getPosition();
+        pos.x() = cameraPos.x();
+        pos.y() = cameraPos.y();
+        mWaterNode->setPosition(pos);
     }
 
     void Water::update(float dt, bool paused)

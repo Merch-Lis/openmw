@@ -43,8 +43,6 @@ namespace Settings
             makeMaxSanitizerFloat(1) };
         SettingValue<float> mObjectPagingSimplifyStrength{ mIndex, "Terrain", "object paging simplify strength",
             makeMaxSanitizerFloat(0) };
-        SettingValue<float> mObjectPagingPopDistanceFloor{ mIndex, "Terrain", "object paging pop distance floor",
-            makeMaxSanitizerFloat(0) };
         SettingValue<bool> mObjectPagingCacheCompression{ mIndex, "Terrain", "object paging cache compression" };
         SettingValue<int> mObjectPagingReadThreads{ mIndex, "Terrain", "object paging read threads",
             makeClampSanitizerInt(1, 16) };

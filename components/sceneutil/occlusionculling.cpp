@@ -205,7 +205,7 @@ namespace SceneUtil
             }
             else
             {
-                // Corner is behind camera — conservatively expand to full screen
+                // Corner is behind camera, conservatively expand to full screen
                 ndcMinX = -1.0f;
                 ndcMinY = -1.0f;
                 ndcMaxX = 1.0f;

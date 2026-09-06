@@ -72,11 +72,19 @@ varying vec4 passTangent;
 #include "lib/light/lighting.glsl"
 #include "lib/view/depth.glsl"
 
+// here in the vertex stage and ships through varyings; the paired
+// fragment defines MGE_WX_STAGE 0 and decodes. mge_fog.glsl declares
+// osg_ViewMatrixInverse itself (do not redeclare below).
+// full core per vertex measured ~20 fps static at Seyda Neen and 5 fps
+// camera-turn hitches (permutation compile storms of the huge vertex
+// body - the 95/97 class relocated to the vertex stage). The lite tier
+// below is the measured scene ceiling; v5 stays water + post only.
+#include "mge_fog.glsl"
+
 #if @particleOcclusion
 varying vec3 orthoDepthMapCoord;
 
 uniform mat4 depthSpaceMatrix;
-uniform mat4 osg_ViewMatrixInverse;
 #endif
 
 void main(void)
@@ -160,4 +168,6 @@ void main(void)
 #if (@shadows_enabled)
     setupShadowCoords(viewPos, viewNormal);
 #endif
+
+    mgeWxEmitVaryings(); // scene verdict hoist (mge_fog.glsl)
 }

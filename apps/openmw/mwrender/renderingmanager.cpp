@@ -1,3 +1,4 @@
+#include <cmath>
 #include "renderingmanager.hpp"
 
 #include <cstdlib>
@@ -313,7 +314,7 @@ namespace MWRender
         resourceSystem->getSceneManager()->setSupportsNormalsRT(mPostProcessor->getSupportsNormalsRT());
         resourceSystem->getSceneManager()->setWeatherParticleOcclusion(Settings::shaders().mWeatherParticleOcclusion);
 
-        // NOTE: must stay after PostProcessor construction. The loader
+        // Note: must stay after PostProcessor construction. The loader
         // threads compile object shaders, which need the postprocessor's
         // global defines (distorionRTRatio) and reserved texture units.
         // mge-exact: session-resident distant statics. Loaded once here, held
@@ -840,6 +841,32 @@ namespace MWRender
 
         mWater->setRainIntensity(mSky->getRainRipplesEnabled() ? mSky->getPrecipitationAlpha() : 0.f);
 
+        mWater->setCameraPosition(osg::Vec3f(mCamera->getPosition())); // displaced wave geometry recentre (no-op on flat sheet)
+        // terrain height map the displaced water shader fades waves with.
+        // 64x64 over 12288 u; rebaked when the camera crosses 1024 u (4096
+        // getHeightAt calls, the same query actor placement uses). Missing
+        // land reads the storage default (deep ocean) - full waves offshore.
+        if (osg::Image* shore = mWater->getShoreImage())
+        {
+            const osg::Vec3f cam = mCamera->getPosition();
+            constexpr float extent = 12288.f;
+            const osg::Vec2f snapped(std::floor(cam.x() / 1024.f) * 1024.f,
+                                     std::floor(cam.y() / 1024.f) * 1024.f);
+            if (!mShoreBaked || (snapped - mShoreBakeOrigin).length2() > 1.f)
+            {
+                mShoreBakeOrigin = snapped;
+                mShoreBaked = true;
+                const osg::Vec2f origin = snapped - osg::Vec2f(extent / 2.f, extent / 2.f);
+                float* px = reinterpret_cast<float*>(shore->data());
+                for (int y = 0; y < 64; ++y)
+                    for (int x = 0; x < 64; ++x)
+                        px[y * 64 + x] = mTerrain->getHeightAt(osg::Vec3f(
+                            origin.x() + (x + 0.5f) * (extent / 64.f),
+                            origin.y() + (y + 0.5f) * (extent / 64.f), 0.f));
+                shore->dirty();
+                mWater->setShoreMapParams(origin, extent, true);
+            }
+        }
         mWater->update(dt, paused);
         if (!paused)
         {

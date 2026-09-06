@@ -31,6 +31,8 @@ varying vec3 passNormal;
 #include "lib/light/lighting.glsl"
 #include "lib/view/depth.glsl"
 
+#include "mge_fog.glsl"
+
 void main(void)
 {
     gl_Position = modelToClip(gl_Vertex);
@@ -70,4 +72,6 @@ void main(void)
 #if (@shadows_enabled)
     setupShadowCoords(viewPos, viewNormal);
 #endif
+
+    mgeWxEmitVaryings(); // scene verdict hoist (mge_fog.glsl)
 }

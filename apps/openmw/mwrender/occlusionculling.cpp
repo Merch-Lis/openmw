@@ -48,7 +48,7 @@ namespace
             if (!geom)
                 return;
 
-            // Skip alpha-tested drawables (e.g. tree leaf billboards) —
+            // Skip alpha-tested drawables (e.g. tree leaf billboards),
             // their transparent regions would cause false occlusion.
             // NIF loader applies AlphaFunc to the parent Group, not the Geometry itself,
             // so check both the drawable and its immediate parent.
@@ -371,7 +371,7 @@ namespace MWRender
         // Begin occlusion frame with camera matrices
         mCuller->beginFrame(cam->getViewMatrix(), cam->getProjectionMatrix());
 
-        // Build and rasterize terrain occluder mesh (skip for quasi-exteriors and interiors — no real terrain)
+        // Build and rasterize terrain occluder mesh (skip for quasi-exteriors and interiors, no real terrain)
         if (mEnableTerrainOccluder && !mIsQuasiExterior && !mIsInterior && mTerrainOccluder->hasTerrainData())
         {
             mPositions.clear();
@@ -382,7 +382,7 @@ namespace MWRender
                 mCuller->rasterizeOccluder(mPositions, mIndices);
         }
 
-        // Continue normal cull traversal — CellOcclusionCallbacks will test against the buffer
+        // Continue normal cull traversal, CellOcclusionCallbacks will test against the buffer
         traverse(node, cv);
 
         // End the occlusion frame so sub-camera traversals (water reflection/refraction,
@@ -390,7 +390,7 @@ namespace MWRender
         // the main camera's occlusion buffer.
         mCuller->endFrame();
 
-        // Update debug overlay AFTER traversal (terrain + building occluders now in buffer)
+        // Update debug overlay after traversal (terrain + building occluders now in buffer)
         if (mEnableDebugOverlay)
         {
             if (!mDebugCamera)
@@ -447,7 +447,7 @@ namespace MWRender
             osg::BoundingBox worldBB(worldCenter.x() - r, worldCenter.y() - r, worldCenter.z() - r, worldCenter.x() + r,
                 worldCenter.y() + r, worldCenter.z() + r);
 
-            // If entire chunk is occluded, skip rasterization AND traversal
+            // If entire chunk is occluded, skip rasterization and traversal
             if (!mCuller->testVisibleAABB(worldBB))
                 return;
 
@@ -540,7 +540,7 @@ namespace MWRender
             return;
         }
 
-        // Test cell bounding box first — if fully occluded, skip entire cell
+        // Test cell bounding box first, if fully occluded, skip entire cell
         const osg::BoundingSphere& cellBS = node->getBound();
         if (cellBS.valid())
         {
@@ -548,12 +548,12 @@ namespace MWRender
             cellBB.expandBy(cellBS);
 
             if (!mCuller->testVisibleAABB(cellBB))
-                return; // Entire cell occluded — no children traversed
+                return; // Entire cell occluded, no children traversed
         }
 
         const unsigned int numChildren = node->getNumChildren();
 
-        // Pass 1: Large objects — test against terrain depth, optionally rasterize as occluders
+        // Pass 1: Large objects, test against terrain depth, optionally rasterize as occluders
         for (unsigned int i = 0; i < numChildren; ++i)
         {
             osg::Node* child = node->getChild(i);
@@ -562,7 +562,7 @@ namespace MWRender
             if (!bs.valid() || bs.radius() < mOccluderMinRadius)
                 continue;
 
-            // Paged chunks and other oversized objects — test visibility, rasterize stored occluders
+            // Paged chunks and other oversized objects, test visibility, rasterize stored occluders
             if (bs.radius() > mOccluderMaxRadius)
             {
                 // Rasterize sub-object occluder meshes stored at chunk creation time
@@ -610,7 +610,7 @@ namespace MWRender
             {
                 if (mEnableStaticOccluders && !mesh.indices.empty())
                 {
-                    // Skip rasterization for distant buildings — they cover few pixels
+                    // Skip rasterization for distant buildings, they cover few pixels
                     // and terrain already handles far-distance occlusion
                     float distSq = (bs.center() - cv->getEyePoint()).length2();
                     if (distSq < mOccluderMaxDistanceSq)
@@ -638,10 +638,10 @@ namespace MWRender
 
                 child->accept(*cv);
             }
-            // else: occluded by terrain — skip entirely
+            // else: occluded by terrain, skip entirely
         }
 
-        // Pass 2: Small objects — test against enriched depth buffer (terrain + buildings)
+        // Pass 2: Small objects, test against enriched depth buffer (terrain + buildings)
         for (unsigned int i = 0; i < numChildren; ++i)
         {
             osg::Node* child = node->getChild(i);
@@ -656,7 +656,7 @@ namespace MWRender
             if (bs.radius() >= mOccluderMinRadius)
                 continue; // Already handled in pass 1
 
-            // Never occlude doors — they sit flush against building surfaces
+            // Never occlude doors, they sit flush against building surfaces
             // and are easily falsely hidden by the parent building's AABB occluder
             bool skipOcclusion = false;
             child->getUserValue("skipOcclusion", skipOcclusion);
@@ -666,7 +666,7 @@ namespace MWRender
 
             if (skipOcclusion || mCuller->testVisibleAABB(childBB))
                 child->accept(*cv);
-            // else: occluded — skip
+            // else: occluded, skip
         }
     }
 }

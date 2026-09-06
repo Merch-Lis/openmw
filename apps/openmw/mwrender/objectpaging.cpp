@@ -232,7 +232,7 @@ namespace MWRender
         };
 
         // NifOsg::MatrixTransform: positions animated-mesh subtrees (banners,
-        // waterfalls) that the optimizer cannot flatten (DYNAMIC variance).
+        // waterfalls) that the optimizer cannot flatten (dynamic variance).
         // Static pose lives in the osg::MatrixTransform base, so an
         // associate-chain wrapper round-trips it; the custom controller
         // members (mScale/mRotationScale) only matter for runtime animation,
@@ -509,7 +509,7 @@ namespace MWRender
 
     void ObjectPaging::enqueueChunkLoad(PendingChunkLoad&& job)
     {
-        const float cellSize = ESM::getCellSize(mWorldspace);
+        const float cellSize = static_cast<float>(ESM::getCellSize(mWorldspace));
         const osg::Vec2f worldCenter = job.mCenter * cellSize;
         const float distance = (osg::Vec2f(job.mViewPoint.x(), job.mViewPoint.y()) - worldCenter).length();
 
@@ -835,7 +835,7 @@ namespace MWRender
         struct StatsGuard
         {
             std::chrono::steady_clock::time_point mStart;
-            std::uintmax_t mBytes;
+            std::uintmax_t mBytes = 0;
             const std::filesystem::path& mFile;
             ~StatsGuard()
             {
@@ -2205,7 +2205,7 @@ namespace MWRender
             ESM::RefNum mRefNum;
             osg::Vec3f mPosition;
             osg::Vec3f mRotation;
-            float mScale;
+            float mScale = 0.f;
         };
 
         PagedCellRef makePagedCellRef(const ESM::CellRef& value)
@@ -2835,8 +2835,8 @@ namespace MWRender
 
         struct MwdsIn
         {
-            const char* mPtr;
-            const char* mEnd;
+            const char* mPtr = nullptr;
+            const char* mEnd = nullptr;
             bool mFail = false;
             template <typename T>
             T get()
@@ -2918,7 +2918,7 @@ namespace MWRender
                         attrs.put(static_cast<std::uint8_t>(1));
                         attrs.put(static_cast<std::uint32_t>(flags));
                         // osg::Material::ColorMode values are GL enums (GL_AMBIENT
-                        // 0x1200 ... OFF 0x1603); truncating one to a byte gives
+                        // 0x1200 ... off 0x1603); truncating one to a byte gives
                         // garbage modes and a per-frame GL_INVALID_ENUM at draw.
                         // Serialize a compact index instead.
                         std::uint8_t cmIndex;
@@ -3250,7 +3250,7 @@ namespace MWRender
         // from one optimized class group; errors loudly on unexpected nodes
         struct MwdsGeom
         {
-            const osg::Geometry* mGeom;
+            const osg::Geometry* mGeom = nullptr;
             osg::Matrixf mMatrix;
             std::vector<const osg::StateSet*> mChain;
         };
@@ -3634,8 +3634,8 @@ namespace MWRender
         struct ClassData
         {
             osg::Vec3f mCenterLocal;
-            float mRadius;
-            int mClass;
+            float mRadius = 0.f;
+            int mClass = 0;
             std::vector<MwdsGeom> mGeoms;
         };
         std::vector<ClassData> classes;
@@ -4296,7 +4296,7 @@ namespace MWRender
         if (!mResidentDistantStatics.load() || mResidentDir.empty())
             return;
         const float cellSize = static_cast<float>(getCellSize(mWorldspace));
-        const int S = sSupercellSize;
+        const int superSize = sSupercellSize;
         const int pcx = static_cast<int>(std::floor(eye.x() / cellSize));
         const int pcy = static_cast<int>(std::floor(eye.y() / cellSize));
         const osg::Vec2i playerCell(pcx, pcy);
@@ -4310,17 +4310,17 @@ namespace MWRender
         bool queued = false;
         std::lock_guard<std::mutex> lock(mRingMutex);
         // rings must never be outrun by the live viewing distance
-        const int viewCells = static_cast<int>(std::ceil(Settings::camera().mViewingDistance / cellSize)) + S;
+        const int viewCells = static_cast<int>(std::ceil(Settings::camera().mViewingDistance / cellSize)) + superSize;
         for (int k = 0; k < 3; ++k)
         {
             const int r = ringCells[k] <= 0 ? 0 : std::max(ringCells[k], viewCells);
             if (r <= 0)
                 continue; // globally resident, not ring-managed
             // load pass: supercells whose cell interval overlaps the ring
-            const int sx0 = static_cast<int>(std::floor(static_cast<float>(pcx - r) / S)) * S;
-            const int sy0 = static_cast<int>(std::floor(static_cast<float>(pcy - r) / S)) * S;
-            for (int sx = sx0; sx <= pcx + r; sx += S)
-                for (int sy = sy0; sy <= pcy + r; sy += S)
+            const int sx0 = static_cast<int>(std::floor(static_cast<float>(pcx - r) / superSize)) * superSize;
+            const int sy0 = static_cast<int>(std::floor(static_cast<float>(pcy - r) / superSize)) * superSize;
+            for (int sx = sx0; sx <= pcx + r; sx += superSize)
+                for (int sy = sy0; sy <= pcy + r; sy += superSize)
                 {
                     std::snprintf(namebuf, sizeof(namebuf), "dl_%d_%d%s", sx, sy, sClassName[k]);
                     if (mRingLoaded.emplace(namebuf, std::make_pair(osg::Vec2i(sx, sy), k)).second)
@@ -4335,8 +4335,8 @@ namespace MWRender
         for (auto it = mRingLoaded.begin(); it != mRingLoaded.end();)
         {
             const auto& [cell, k] = it->second;
-            const int r = (ringCells[k] <= 0 ? 0 : std::max(ringCells[k], viewCells)) + S;
-            if (cell.x() + S - 1 < pcx - r || cell.x() > pcx + r || cell.y() + S - 1 < pcy - r || cell.y() > pcy + r)
+            const int r = (ringCells[k] <= 0 ? 0 : std::max(ringCells[k], viewCells)) + superSize;
+            if (cell.x() + superSize - 1 < pcx - r || cell.x() > pcx + r || cell.y() + superSize - 1 < pcy - r || cell.y() > pcy + r)
             {
                 mRingSwaps.emplace_back(it->first, nullptr);
                 it = mRingLoaded.erase(it);

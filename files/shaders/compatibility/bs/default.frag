@@ -102,6 +102,11 @@ void main()
 
     gl_FragData[0].xyz = gl_FragData[0].xyz * lighting + specular;
 
+    // MGE XE shadow receiver: multiplies the final colour, ambient included,
+    // before fog.
+    // This branch previously had NO cloud fade at all - now consistent.
+    gl_FragData[0].xyz *= mgeShadowMult(shadowing, viewNormal);
+
     gl_FragData[0] = applyFogAtDist(gl_FragData[0], euclideanDepth, linearDepth, far);
 
 #if defined(FORCE_OPAQUE) && FORCE_OPAQUE

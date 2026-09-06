@@ -153,10 +153,10 @@ namespace MWRender
         {
             ChunkId mId;
             std::filesystem::path mFile; // empty = no disk cache
-            float mSize;
+            float mSize = 0.f;
             osg::Vec2f mCenter;
             osg::Vec3f mViewPoint;
-            unsigned char mLod;
+            unsigned char mLod = 0;
             osg::ref_ptr<osg::Group> mPlaceholder;
         };
 

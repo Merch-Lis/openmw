@@ -28,6 +28,12 @@ namespace Settings
         SettingValue<float> mRefractionScale{ mIndex, "Water", "refraction scale", makeClampSanitizerFloat(0, 1) };
         SettingValue<bool> mSunlightScattering{ mIndex, "Water", "sunlight scattering" };
         SettingValue<bool> mWobblyShores{ mIndex, "Water", "wobbly shores" };
+        // Full tier, Wonders of Water layer: replace the flat water sheet
+        // with the camera-centred radial mesh and displace it in the vertex
+        // stage (MGE XE's DYNAMIC_RIPPLES mechanic). Load-time. A stock exe
+        // has no reader for this key; the water package's settings fragment
+        // enables it. docs/full-water-geometry-design.md (WFR repo).
+        SettingValue<bool> mDisplacedWaveGeometry{ mIndex, "Water", "displaced wave geometry" };
     };
 }
 

@@ -1122,15 +1122,15 @@ void MWShadowTechnique::cull(osgUtil::CullVisitor& cv)
     // Reuse previous frame's shadow textures (FBO-persistent) + uniforms (already in correct slot).
     // Per-VDD counter: each CullVisitor has its own VDD (two CVs alternate in DrawThreadPerContext),
     // so we count per-VDD calls rather than using global frame numbers.
-    // Note: we do NOT recompute uniforms here. Each VDD always uses the same uniform slot
-    // (traversalNumber % 2), so the values from the previous UPDATE are still valid.
+    // Note: we do not recompute uniforms here. Each VDD always uses the same uniform slot
+    // (traversalNumber % 2), so the values from the previous update are still valid.
     // Recomputing via copyShadowStateSettings would produce wrong validRegionMatrix values
     // because shadow cameras have post-adjustment projection matrices, but assignValidRegionSettings
     // needs pre-adjustment projections (the adjustment happens between the two assign calls
-    // in the UPDATE path).
+    // in the update path).
     // Staleness cap: force a shadow update if the shadow map is too old.
     // At low FPS the skip gap grows (e.g. 133ms at 15fps with interval=2),
-    // making stale shadows noticeable. Cap at 40ms — this lets the skip
+    // making stale shadows noticeable. Cap at 40ms, this lets the skip
     // work at 30+ fps where it helps, and backs off when FPS is already low.
     constexpr double maxShadowStaleness = 0.040;
     double currentTime = cv.getFrameStamp()->getReferenceTime();
@@ -1145,7 +1145,7 @@ void MWShadowTechnique::cull(osgUtil::CullVisitor& cv)
         ++vdd->_framesSinceLastShadowCull;
 
         // Recompute only shadowSpaceMatrix (SSM) for current camera position.
-        // VRM (validRegionMatrix) stays from previous UPDATE — it was computed with
+        // VRM (validRegionMatrix) stays from previous update, it was computed with
         // pre-adjustment projection which we no longer have access to.
         // SSM needs current inverse(ModelView) so fragments in current eye space
         // map correctly to the stale shadow textures.
@@ -2717,7 +2717,7 @@ bool MWShadowTechnique::cropShadowCameraToMainFrustum(Frustum& frustum, osg::Cam
         return false;
 
     // Inflate shadow frustum slightly to provide margin for temporal reuse.
-    // On skip frames, the camera moves but the shadow map is frozen — this
+    // On skip frames, the camera moves but the shadow map is frozen, this
     // extra margin prevents shadows popping at screen edges.
     if (_frustumExpansionBase > 0.0 || _frustumExpansionPerSkip > 0.0)
     {

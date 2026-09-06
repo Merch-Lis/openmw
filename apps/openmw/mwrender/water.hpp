@@ -8,6 +8,9 @@
 #include <osg/Vec3f>
 #include <osg/Vec4f>
 #include <osg/ref_ptr>
+#include <osg/Image>
+#include <osg/Texture2D>
+#include <osg/Vec4f>
 
 #include <components/settings/settings.hpp>
 #include <components/vfs/pathutil.hpp>
@@ -60,6 +63,10 @@ namespace MWRender
         osg::ref_ptr<osg::Group> mSceneRoot;
         osg::ref_ptr<osg::PositionAttitudeTransform> mWaterNode;
         osg::ref_ptr<osg::Geometry> mWaterGeom;
+        bool mDisplacedGeometry = false; // radial mesh + vertex displacement active
+        osg::ref_ptr<osg::Image> mShoreImage;    // 64x64 float heights, renderer-baked
+        osg::ref_ptr<osg::Texture2D> mShoreTex;
+        osg::Vec4f mShoreParams{ 0.f, 0.f, 0.f, 0.f }; // origin.xy, 1/extent, valid
         Resource::ResourceSystem* mResourceSystem;
         osg::ref_ptr<osgUtil::IncrementalCompileOperation> mIncrementalCompileOperation;
 
@@ -121,6 +128,27 @@ namespace MWRender
         void setRefractionViewerFog(bool viewerUnderwater, float start, float end, const osg::Vec4f& color);
 
         void update(float dt, bool paused);
+
+        /// Displaced wave geometry (Full tier): recentre the radial water
+        /// mesh on the camera every frame, XE's renderwater.cpp:441 move.
+        /// No-op when the flat sheet is in use.
+        void setCameraPosition(const osg::Vec3f& cameraPos);
+
+        bool isDisplacedGeometry() const { return mDisplacedGeometry; }
+
+        /// Depth-aware wave attenuation (displaced mode): the renderer bakes
+        /// a camera-window terrain height map into the image this returns
+        /// (null when not in displaced mode) and reports its placement via
+        /// setShoreMapParams. The shader fades displacement to zero over
+        /// shallow and dry ground - waves can never cross a beach.
+        osg::Image* getShoreImage() { return mShoreImage.get(); }
+        osg::Texture2D* getShoreTexture() { return mShoreTex.get(); }
+        void setShoreMapParams(const osg::Vec2f& origin, float extent, bool valid)
+        {
+            mShoreParams.set(origin.x(), origin.y(), extent > 0.f ? 1.f / extent : 0.f,
+                             valid ? 1.f : 0.f);
+        }
+        const osg::Vec4f& getShoreMapParams() const { return mShoreParams; }
 
         osg::Vec3d getPosition() const;
 

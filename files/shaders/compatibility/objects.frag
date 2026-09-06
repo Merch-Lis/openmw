@@ -95,6 +95,9 @@ varying vec4 passTangent;
 #include "lib/material/alpha.glsl"
 #include "lib/util/distortion.glsl"
 
+// this program decodes the varyings only. Do not remove this define - the
+// compute-mode fallback would reintroduce the fragment register footprint.
+#define MGE_WX_STAGE 0
 #include "fog.glsl"
 #include "vertexcolors.glsl"
 #include "shadows_fragment.glsl"
@@ -116,6 +119,7 @@ varying vec3 orthoDepthMapCoord;
 
 void main()
 {
+    mgeWxCompute(); // single-instance weather decomposition
 #if @particleOcclusion
     applyOcclusionDiscard(orthoDepthMapCoord, texture2D(orthoDepthMap, orthoDepthMapCoord.xy * 0.5 + 0.5).r);
 #endif
@@ -215,13 +219,12 @@ vec2 screenCoords = gl_FragCoord.xy / screenRes;
 #endif
 
     float shadowing = unshadowedLightRatio(-passViewPos.z);
-    // MGE parity: cloud cover fades shadows (XE Mod Shadow.fx
-    // x *= 0.25 + 0.75*sunVis; sunVis = light 0 specular alpha)
-    shadowing = 1.0 - (1.0 - shadowing) * (0.25 + 0.75 * clamp(lcalcSpecular(0).a, 0.0, 1.0));
+    // Sun contribution stays full here; the MGE shadow receiver darkens the
+    // final colour below (mgeShadowMult - cloud fade lives inside it now).
     vec3 lighting, specular;
 #if !PER_PIXEL_LIGHTING
-    lighting = passLighting + shadowDiffuseLighting * shadowing;
-    specular = passSpecular + shadowSpecularLighting * shadowing;
+    lighting = passLighting + shadowDiffuseLighting;
+    specular = passSpecular + shadowSpecularLighting;
 #else
 #if @specularMap
     vec4 specTex = texture2D(specularMap, specularMapUV);
@@ -249,6 +252,10 @@ vec2 screenCoords = gl_FragCoord.xy / screenRes;
 #endif
 
     gl_FragData[0].xyz = perObjectTonemap(gl_FragData[0].xyz);
+
+    // MGE XE shadow receiver: multiplies the final colour, ambient included,
+    // before fog.
+    gl_FragData[0].xyz *= mgeShadowMult(shadowing, viewNormal);
 
     gl_FragData[0] = applyFogAtPos(gl_FragData[0], passViewPos, far);
 

@@ -1,5 +1,7 @@
 #include "waterutil.hpp"
 
+#include <cmath>
+
 #include <osg/Depth>
 #include <osg/Geometry>
 #include <osg/Material>
@@ -60,6 +62,63 @@ namespace SceneUtil
 
         waterGeom->addPrimitiveSet(
             new osg::DrawArrays(osg::PrimitiveSet::QUADS, 0, static_cast<GLsizei>(verts->size())));
+        waterGeom->setComputeBoundingBoxCallback(new WaterBoundCallback);
+        waterGeom->setCullingActive(false);
+        return waterGeom;
+    }
+
+    osg::ref_ptr<osg::Geometry> createRadialWaterGeometry(
+        int segments, int rings, float ringMax, float horizonRadius)
+    {
+        osg::ref_ptr<osg::Vec3Array> verts(new osg::Vec3Array);
+        verts->reserve(segments * rings + 1);
+
+        verts->push_back(osg::Vec3f(0.f, 0.f, 0.f));
+        const float dS = static_cast<float>(2.0 * osg::PI / segments);
+        for (int t = 0; t < rings; ++t)
+        {
+            float u = static_cast<float>(t) / rings;
+            float r = ringMax * (0.9f * u * u * u + 0.1f * u);
+            if (t + 1 == rings)
+                r = horizonRadius; // extend last ring past the horizon (XE)
+            for (int sgt = 0; sgt < segments; ++sgt)
+                verts->push_back(osg::Vec3f(r * std::cos(dS * sgt), r * std::sin(dS * sgt), 0.f));
+        }
+
+        osg::ref_ptr<osg::DrawElementsUInt> indices(new osg::DrawElementsUInt(osg::PrimitiveSet::TRIANGLES));
+        indices->reserve((2 * segments * rings - segments) * 3);
+        // centre fan
+        for (int sgt = 0; sgt < segments; ++sgt)
+        {
+            indices->push_back(0);
+            indices->push_back(1 + sgt);
+            indices->push_back(1 + (sgt + 1) % segments);
+        }
+        // ring strips, indexed exactly as XE (distantinit.cpp:616-626)
+        for (int t = 1; t < rings; ++t)
+        {
+            for (int sgt = 0; sgt < segments; ++sgt)
+            {
+                unsigned tbase = 1 + segments * (t - 1);
+                unsigned s2 = (sgt + 1) % segments;
+                indices->push_back(tbase + sgt);
+                indices->push_back(segments + tbase + sgt);
+                indices->push_back(tbase + s2);
+                indices->push_back(segments + tbase + sgt);
+                indices->push_back(segments + tbase + s2);
+                indices->push_back(tbase + s2);
+            }
+        }
+
+        osg::ref_ptr<osg::Geometry> waterGeom(new osg::Geometry);
+        waterGeom->setVertexArray(verts);
+
+        osg::ref_ptr<osg::Vec3Array> normal(new osg::Vec3Array);
+        normal->push_back(osg::Vec3f(0, 0, 1));
+        waterGeom->setNormalArray(normal, osg::Array::BIND_OVERALL);
+
+        waterGeom->addPrimitiveSet(indices);
+        // same policy as the flat sheet: never culled, no bbox test
         waterGeom->setComputeBoundingBoxCallback(new WaterBoundCallback);
         waterGeom->setCullingActive(false);
         return waterGeom;

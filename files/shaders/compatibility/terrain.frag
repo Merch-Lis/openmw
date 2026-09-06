@@ -41,11 +41,13 @@ uniform float far;
 #include "shadows_fragment.glsl"
 #include "lib/light/lighting.glsl"
 #include "lib/material/parallax.glsl"
+#define MGE_WX_STAGE 0
 #include "fog.glsl"
 #include "compatibility/normals.glsl"
 
 void main()
 {
+    mgeWxCompute(); // single-instance weather decomposition
     vec2 adjustedUV = (gl_TextureMatrix[0] * vec4(uv, 0.0, 1.0)).xy;
 
 #if @parallax
@@ -75,13 +77,12 @@ void main()
 #endif
 
     float shadowing = unshadowedLightRatio(linearDepth);
-    // MGE parity: cloud cover fades shadows (XE Mod Shadow.fx
-    // x *= 0.25 + 0.75*sunVis; sunVis = light 0 specular alpha)
-    shadowing = 1.0 - (1.0 - shadowing) * (0.25 + 0.75 * clamp(lcalcSpecular(0).a, 0.0, 1.0));
+    // Sun contribution stays full here; the MGE shadow receiver darkens the
+    // final colour below (mgeShadowMult - cloud fade lives inside it now).
     vec3 lighting, specular;
 #if !PER_PIXEL_LIGHTING
-    lighting = passLighting + shadowDiffuseLighting * shadowing;
-    specular = passSpecular + shadowSpecularLighting * shadowing;
+    lighting = passLighting + shadowDiffuseLighting;
+    specular = passSpecular + shadowSpecularLighting;
 #else
 #if @specularMap
     float shininess = 128.0; // TODO: make configurable
@@ -100,6 +101,10 @@ void main()
     gl_FragData[0].xyz = gl_FragData[0].xyz * lighting + specular;
 
     gl_FragData[0].xyz = perObjectTonemap(gl_FragData[0].xyz);
+
+    // MGE XE shadow receiver: multiplies the final colour, ambient included,
+    // before fog.
+    gl_FragData[0].xyz *= mgeShadowMult(shadowing, viewNormal);
 
     gl_FragData[0] = applyFogAtPos(gl_FragData[0], passViewPos, far);
 

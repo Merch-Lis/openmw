@@ -161,12 +161,42 @@ void clampLightingResult(inout vec3 lighting)
 }
 
 // MGE XE-style per-object tonemap: polynomial maps [0, 2.2] -> [0, 1].
-// Midtones nearly untouched (0.5 -> 0.506), highlights compressed.
 vec3 perObjectTonemap(vec3 c)
 {
     c = clamp(c, 0.0, 2.2);
     return (((0.0548303 * c - 0.189786) * c - 0.154732) * c + 1.12969) * c;
 }
 
+// User option: the cloud-cover shadow fade. 0.25 = MGE XE behaviour
+// (cloud cover weakens shadows: overcast shadows run ~half of vanilla
+// OpenMW's depth), 1.0 = no fade (shadows keep near-vanilla strength in
+// every weather). OpenMW Graphics Extender rewrites the value on this
+// line in the installed copy; keep the define on one line. At 0.25 the
+// arithmetic below is identical to the original hardcoded form.
+#define MGE_CLOUD_SHADOW_FADE_FLOOR 0.25
+
+// MGE XE shadow receiver, ported from "XE Mod Shadow.fx" (MGE XE 0.16.0).
+// shade (0.4) is the half-saturation constant of the saturating curve
+// x/(shade+x) on incoming sun luminance - not a linear factor (the first
+// port used it as one and shipped shadows 3-6x weaker than MGE). The
+// result multiplies the final colour, ambient included
+// (XE Main.fx: SrcBlend=Zero, DestBlend=InvSrcColor) - MGE's own comment:
+// "Non-standard shadow luminance, to create sufficient contrast when
+// ambient is high". Cloud cover enters inside x (x *= 0.25 + 0.75*sunVis),
+// weakening overcast shadows along the same curve. Deliberate delta from
+// XE: we apply this before fog, so fog is never shadowed and XE's
+// pow(fogatt, 2) term is unnecessary; shadows reach slightly deeper into
+// dense-weather haze than XE's (bounded in scripts sim: <= 43/255 at 50%
+// fog, zero at no fog, and the shadow-map distance fade ends shadows long
+// before clear-weather fog matters).
+vec3 mgeShadowMult(float shadowing, vec3 viewNormal)
+{
+    float lambert = clamp(dot(viewNormal, normalize(lcalcPosition(0))), 0.0, 1.0);
+    float x = lambert * dot(lcalcDiffuse(0).xyz, vec3(0.36, 0.53, 0.11));
+    x *= MGE_CLOUD_SHADOW_FADE_FLOOR
+        + (1.0 - MGE_CLOUD_SHADOW_FADE_FLOOR) * clamp(lcalcSpecular(0).a, 0.0, 1.0);
+    float light = x / (0.4 + x);
+    return vec3(1.0) - (1.0 - shadowing) * light * vec3(1.0, 0.97, 0.81);
+}
 
 #endif

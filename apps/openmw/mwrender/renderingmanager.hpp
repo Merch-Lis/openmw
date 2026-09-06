@@ -361,6 +361,8 @@ namespace MWRender
         std::unique_ptr<Water> mWater;
         std::unordered_map<ESM::RefId, WorldspaceChunkMgr> mWorldspaceChunks;
         Terrain::World* mTerrain;
+        osg::Vec2f mShoreBakeOrigin;
+        bool mShoreBaked = false;
         std::unique_ptr<TerrainStorage> mTerrainStorage;
         ObjectPaging* mObjectPaging;
         Groundcover* mGroundcover;

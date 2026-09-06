@@ -1,0 +1,148 @@
+uniform_bool uEnabled {
+    static = false;
+    default = true;
+    display_name = "ENABLED";
+    description = "Master on/off for the depth murk. Off = the frame passes through untouched. Set in Options > Scripts.";
+}
+uniform_float uMurkStrength {
+    static = false;
+    default = 1.0;  min = 0.0;  max = 1.0;  step = 0.05;
+    display_name = "Depth murk: strength";
+    description = "Set in Options > Scripts. How much the water thickens as you dive. Just under the surface the view is left as the engine rendered it; the deeper you go, the more the distance closes in, so depth reads as depth instead of every level looking alike. 0 = off.";
+}
+uniform_float uMurkDepth {
+    static = false;
+    default = 600.0;  min = 100.0;  max = 4000.0;  step = 50.0;
+    display_name = "Depth murk: full-murk depth";
+    description = "Set in Options > Scripts. How far below the surface you must descend for the view to close in fully, in world units. At this depth the fog distances have shrunk to a tenth of their surface values. The MWSE original used 1500; 600 makes Morrowind's mostly-shallow water actually show the effect.";
+}
+uniform_bool uMurkInteriors {
+    static = false;
+    default = true;
+    display_name = "Apply in interiors";
+    description = "Set in Options > Scripts. Whether flooded interiors get the same depth murk as open water. Off = interiors keep the engine's own look.";
+}
+uniform_float uNightEye {
+    static = false;
+    default = 0.0;  min = 0.0;  max = 1.0;  step = 0.05;
+    display_name = "Night-eye bonus (script-fed)";
+    description = "Set by the MGE Water script from the player's active night-eye magnitude. Pushes the murk back so night-eye genuinely helps while diving. Not adjustable here - change it in Options > Scripts > MGE Water.";
+}
+uniform_float uWeatherClarity {
+    static = false;
+    default = 1.0;  min = 0.0;  max = 2.0;  step = 0.05;
+    display_name = "Weather clarity (script-fed)";
+    description = "Set by the MGE Water script from the current weather's clarity value. Below 1 makes the water murkier in that weather, above 1 clearer. Set the per-weather values in Options > Scripts > MGE Water.";
+}
+
+fragment murk {
+    omw_In vec2 omw_TexCoord;
+
+    // The core underwater fog colour is depth-darkened (mge_fog.glsl,
+    // must converge to the same colour or a deep descent bands where the
+    // two targets diverge. Keep these two constants in sync with
+    // MGE_UW_COLOUR_DEPTH / MGE_UW_COLOUR_FLOOR in mge_fog.glsl.
+    const float uwColourDepth = 1500.0;
+    const float uwColourFloor = 0.15;
+    // Stock fallback if the engine range is degenerate: XE's own
+    // -0.5 / 0.3 cells (mirrors mge_fog.glsl MGE_UW_FOG_START/end).
+    const float uwFogStart = -0.5 * 8192.0;
+    const float uwFogEnd = 0.3 * 8192.0;
+
+    void main()
+    {
+        vec3 c = omw_GetLastShader(omw_TexCoord).rgb;
+
+        if (!uEnabled || !omw.isUnderwater || (omw.isInterior && !uMurkInteriors)
+            || uMurkStrength < 0.001)
+        {
+            omw_FragColor = vec4(c, 1.0);
+            return;
+        }
+
+        // The original's entire visibility mechanic is: scale the
+        // underwater fog start and end by
+        //   V = max(1 + nightEye - depth/ref, 0.1)
+        // so descending shortens how far you can see, continuously, with
+        // one law shared with the scene fog. This pass applies exactly the
+        // extra fog that scaling would have added beyond what the core
+        // already applied at default distances: per pixel,
+        //   extra = 1 - T_scaled(d) / T_default(d)
+        // A structural no-op at V = 1 (surface, no effects), the
+        // original's own behaviour otherwise. It replaces the 449/451
+        // max(eye, sample) construction, whose horizon asymmetry carved
+        // the god-ray glow into a sharp band, and which was designed
+        // against measurements of a build where the core fog was never
+        // actually deployed.
+        //
+        // Clarity scales the depth term, not the whole expression, so
+        // submerging must be a descent, not a step). Night-eye raises V,
+        // but V is capped at 1: a post pass cannot recover detail the
+        // engine has already fogged away.
+        float eyeDepth = max(0.0, omw.waterHeight - omw.eyePos.z);
+        float depthFactor = clamp(eyeDepth / max(uMurkDepth, 1.0), 0.0, 1.0);
+        float V = clamp(1.0 + uNightEye
+                        - uMurkStrength * depthFactor
+                          / max(uWeatherClarity, 0.05),
+                        0.1, 1.0);
+        if (V > 0.999)
+        {
+            omw_FragColor = vec4(c, 1.0);
+            return;
+        }
+
+        float s = omw.fogNear;
+        float e = omw.fogFar;
+        if (!(e > 1.0 && e < 1000000.0 && e > s))
+        {
+            s = uwFogStart;
+            e = uwFogEnd;
+        }
+        float dist = omw_GetLinearDepth(omw_TexCoord);
+        // no depth, so at pixels it covers, dist is the content behind it
+        // - the sky, above-water buildings - and at depth that painted the
+        // entire surface flat (V small, behind-content far => extra = 1),
+        // wiping the real from-below texture; the caustic web seen in
+        // that state was the ray pass repainting over the wipe. The
+        // ray's crossing of the water plane bounds the underwater path:
+        // where the content lies beyond the plane, murk accumulates only
+        // up to it, which is (approximately) the surface's own distance -
+        // the same distance the core fades use, so the two layers agree.
+        // The above-water remainder of such paths keeps the core's default
+        // fog only; XE fogs that stretch with the scaled law too, so we
+        // sit slightly clearer than XE there - second-order next to the
+        // wipe, and zero at V = 1.
+        vec3 mgeWP = omw_GetWorldPosFromUV(omw_TexCoord);
+        float mgeDz = mgeWP.z - omw.eyePos.z;
+        if (mgeDz > 0.0001)
+        {
+            float mgeTf = (omw.waterHeight - omw.eyePos.z) / mgeDz;
+            if (mgeTf < 1.0)
+                dist *= max(mgeTf, 0.0);
+        }
+        float t0 = clamp((e - dist) / max(e - s, 1.0), 0.0, 1.0);
+        float tv = clamp((e * V - dist) / max((e - s) * V, 1.0), 0.0, 1.0);
+        // returned extra = 0 wherever t0 was ~0, but the limit from
+        // below is 1: tv reaches zero long before t0 does, so extra
+        // ramps to 1 approaching the fog end and then jumped to 0 past
+        // it - a hard iso-distance flip that the waves swept back and
+        // forth across the surface as hard-edged flat spots. Beyond the
+        // end both laws are fully fogged and the core has already made
+        // the pixel the same flat colour, so extra = 1 changes nothing
+        // visibly - it just keeps the function continuous.
+        float extra = clamp(1.0 - tv / max(t0, 1e-4), 0.0, 1.0);
+
+        vec3 fogCol = omw.fogColor.rgb
+                    * max(1.0 - eyeDepth / uwColourDepth, uwColourFloor);
+        c = mix(c, fogCol, extra);
+
+        omw_FragColor = vec4(c, 1.0);
+    }
+}
+
+technique {
+    passes = murk;
+    description = "MGE water depth murk: the water thickens as you dive, so depth reads as depth. Weather and night-eye adjust how far you can see, driven by the water script (Options > Scripts > MGE Water). Mechanic after NullCascade's MWSE mod. Place BEFORE the underwater effects in the chain - the god rays are never fogged, in MGE XE or here.";
+    author = "Merch_Lis";
+    version = "1.0";
+}

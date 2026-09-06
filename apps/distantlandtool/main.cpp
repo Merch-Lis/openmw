@@ -374,14 +374,14 @@ namespace
         {
             const std::filesystem::path outDir
                 = std::filesystem::path(Settings::terrain().mObjectPagingDiskCacheDir.get()) / "distant-statics";
-            const int S = MWRender::ObjectPaging::sSupercellSize;
-            const int sx0 = static_cast<int>(std::floor(static_cast<float>(minX) / S)) * S;
-            const int sy0 = static_cast<int>(std::floor(static_cast<float>(minY) / S)) * S;
+            const int superSize = MWRender::ObjectPaging::sSupercellSize;
+            const int sx0 = static_cast<int>(std::floor(static_cast<float>(minX) / superSize)) * superSize;
+            const int sy0 = static_cast<int>(std::floor(static_cast<float>(minY) / superSize)) * superSize;
             std::vector<osg::Vec2i> cells;
-            for (int x = sx0; x <= maxX; x += S)
-                for (int y = sy0; y <= maxY; y += S)
+            for (int x = sx0; x <= maxX; x += superSize)
+                for (int y = sy0; y <= maxY; y += superSize)
                     cells.emplace_back(x, y);
-            Log(Debug::Info) << "Distant statics generation: " << cells.size() << " supercells (" << S << "x" << S
+            Log(Debug::Info) << "Distant statics generation: " << cells.size() << " supercells (" << superSize << "x" << superSize
                              << " cells each) -> " << outDir;
             std::size_t sdone = 0, sbuilt = 0, sskipped = 0;
             for (const osg::Vec2i& c : cells)
