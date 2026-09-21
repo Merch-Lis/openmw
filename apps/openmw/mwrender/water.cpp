@@ -213,7 +213,7 @@ namespace MWRender
 
     /// Moves water mesh away from the camera slightly if the camera gets too close on the Z axis.
     /// The offset works around graphics artifacts that occurred with the GL_DEPTH_CLAMP when the camera gets extremely
-    /// close to the mesh (seen on NVIDIA at least). Must be added as a Cull callback.
+    /// close to the mesh (seen on nvidia at least). Must be added as a Cull callback.
     class FudgeCallback : public SceneUtil::NodeCallback<FudgeCallback, osg::Node*, osgUtil::CullVisitor*>
     {
     public:
@@ -391,7 +391,7 @@ namespace MWRender
             // Inform the shader that we're in a reflection
             camera->getOrCreateStateSet()->addUniform(new osg::Uniform("isReflection", true));
 
-            // XXX: should really flip the FrontFace on each renderable instead of forcing clockwise.
+            // Xxx: should really flip the FrontFace on each renderable instead of forcing clockwise.
             osg::ref_ptr<osg::FrontFace> frontFace(new osg::FrontFace);
             frontFace->setMode(osg::FrontFace::CLOCKWISE);
             camera->getOrCreateStateSet()->setAttributeAndModes(frontFace, osg::StateAttribute::ON);
@@ -510,10 +510,12 @@ namespace MWRender
         // Displaced wave geometry (Full tier, Wonders of Water layer):
         // swap the flat sheet for the camera-centred radial mesh that the
         // vertex stage displaces. Requires the water shader (the simple
-        // path has no vertex program to displace anything). Density 384x120
-        // is measured, not XE's 150x120 - our wave field is an order of
-        // magnitude finer than XE's (sim_water_displacement.py, WFR repo,
-        // (5000u) is bounded by this mesh's measured carrying reach.
+        // path has no vertex program to displace anything). Density 768x240
+        // over a 19200 u ring radius is measured, not XE's 150x120 - our wave
+        // field is an order of magnitude finer than XE's (sim_water_
+        // carried the swell to 5000 u; doubled in radius, rings and segments
+        // displacement window in mge_water_data (10000 u) is bounded by this
+        // mesh's measured carrying reach.
         mDisplacedGeometry = Settings::water().mDisplacedWaveGeometry && Settings::water().mShader;
 
         // The local map's simple water stays the flat stock sheet in either
@@ -523,15 +525,16 @@ namespace MWRender
 
         if (mDisplacedGeometry)
         {
-            mWaterGeom = SceneUtil::createRadialWaterGeometry(384, 120, 9600.f, 500000.f);
-            // height map over 12288 u around the camera, baked by the
+            mWaterGeom = SceneUtil::createRadialWaterGeometry(768, 240, 19200.f, 500000.f);
+            // height map over 24576 u around the camera, baked by the
             // renderer (it owns the terrain), sampled by water.vert to fade
-            // displacement over shallow and dry ground. 12288/2 = 6144 u of
-            // coverage radius > the 5000 u displacement window, so every
-            // displaced vertex is always inside the map.
+            // displacement over shallow and dry ground. 24576/2 = 12288 u of
+            // coverage radius > the 10000 u displacement window, so every
+            // displaced vertex is always inside the map; the texel stays
+            // 192 u, which the shore constants were fitted to (64x64 over
             mShoreImage = new osg::Image;
-            mShoreImage->allocateImage(64, 64, 1, GL_RED, GL_FLOAT);
-            std::fill_n(reinterpret_cast<float*>(mShoreImage->data()), 64 * 64, -2048.f);
+            mShoreImage->allocateImage(128, 128, 1, GL_RED, GL_FLOAT);
+            std::fill_n(reinterpret_cast<float*>(mShoreImage->data()), 128 * 128, -2048.f);
             mShoreTex = new osg::Texture2D(mShoreImage);
             mShoreTex->setInternalFormat(GL_R32F);
             mShoreTex->setWrap(osg::Texture::WRAP_S, osg::Texture::CLAMP_TO_EDGE);
@@ -627,12 +630,6 @@ namespace MWRender
             mReflection->setWaterLevel(mTop);
             if (mDisplacedGeometry)
             {
-                // Keep reflected content down to a wave trough below the
-                // plane. 25 = XE's exact allowance (0.5 x waveHeight at the
-                // ini's 50). The first shipment used 55 (the procedural storm
-                // half-extent) and the swim test showed why XE keeps
-                // this tight: at grazing angles crest faces reflect whatever
-                // the margin admits, and 55 u of below-surface content read
                 mReflection->setClipMargin(25.f);
             }
             mReflection->setScene(mSceneRoot);
@@ -852,7 +849,7 @@ namespace MWRender
                     waveVolume->setWrap(osg::Texture::WRAP_S, osg::Texture::REPEAT);
                     waveVolume->setWrap(osg::Texture::WRAP_T, osg::Texture::REPEAT);
                     waveVolume->setWrap(osg::Texture::WRAP_R, osg::Texture::REPEAT);
-                    // XE Common.fx sampWater3d: linear min/mag, NO mip
+                    // XE Common.fx sampWater3d: linear min/mag, no mip
                     waveVolume->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR);
                     waveVolume->setFilter(osg::Texture::MAG_FILTER, osg::Texture::LINEAR);
                 }

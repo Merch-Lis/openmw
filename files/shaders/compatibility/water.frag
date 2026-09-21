@@ -43,27 +43,16 @@ const float MGE_UW_REFLECTION_SCALE = 1.0;   // from-below mirror intensity (1 =
                                              // strength reads correctly at 1.0; only
                                              // reduce this if that fogging is removed.
 // Submersion depth over which the from-below mirror trusts the reflection RTT.
-// At the surface-crossing moment the RTT is untrustworthy BY content: OpenMW
+// At the surface-crossing moment the RTT is untrustworthy by content: OpenMW
 // flips the reflection cull plane when the eye submerges (water.cpp:76, the
 // PlaneCullCallback), so the RTT holds only the mirrored below-water world -
 // the sky is above-water content and is culled - and over deep water the
 // mirrored rays hit nothing at all, leaving the camera clear colour, which is
-// black (rtt.cpp:188 clears colour; no setClearColor anywhere; OSG default).
-// At the crossing every surface ray is near-grazing, the UW fresnel above
-// legitimately reaches ~1 on ripple back-faces, and those fragments painted
-// the black void over the correct refracted view - the reported "above-water
-// surface as black-skied" on emerging. (MGE XE never showed this because its
-// underwater reflection texture keeps the mirrored above-water world, sky
-// included - same fresnel, opposite RTT content.)
-// Physically, an internal-reflection mirror over deep water shows extinction
-// - the murk - never black: so the mirror blends from pure murk at the
-// crossing back to the RTT over this many units of camera submersion, by
-// which point the mirrored-seafloor content is real and the grazing void
-// angles are gone. The regular underwater view is untouched either way:
+// Black (rtt.cpp:188 clears colour; no setClearColor anywhere; OSG default).
 // looking up steeply, this fresnel is ~0 and the surface is pure refraction.
 const float MGE_UW_MIRROR_RAMP = 45.0;
 
-// (MGE_UW_GRAZE_MURK and its constants live in mge_water_data.glsl,
+// (MGE_UW_GRAZE_MURK and its constants live in mge_water_data.glsl , 
 // the switch tooling rewrites only that file.)
 
 #if @sunlightScattering
@@ -141,7 +130,7 @@ uniform vec2 screenRes;
 // Displaced wave geometry (Full tier). mgeWaterDisplace: fork-fed runtime
 // gate, 1 only while the radial mesh is live; a stock exe never declares it
 // and GLSL reads 0. mgeDispV: the vertex displacement height - the crest
-// input on the displaced path (the marched relief's replacement).
+// input on the displaced path (the marched relief's replacement). 
 // mgeScreenPosClamp: clip position of the vertex lowered by |displacement| -
 // XE's screenposclamp (XE Mod Water.fx:147-151), so the reflection lookup
 // never samples below the displaced surface.
@@ -214,11 +203,6 @@ float mgeFoamSlice(sampler2D tex, vec2 uv, float t)
 // from the real weather system, the stock engine reconstructs them from the fog
 // palette. rainIntensity is a stock engine uniform and exact on both.
 //
-// Known approximation: weathers that share a fog density and a dryness cannot be
-// told apart from these signals (ash vs blight), so they resolve to the same
-// amplitude. Identity is not available to a core shader on the stock tier (the
-// estimator only sees the fog uniforms), and waves are an artistic scalar, so
-// the approximation is deliberate rather than a limitation to be worked around.
 
 #if MGE_WATER_CAUSTICS
 // ---------------------------------------------------------------------------
@@ -229,7 +213,7 @@ float mgeFoamSlice(sampler2D tex, vec2 uv, float t)
 // scrolling texture, so it never tiles.
 //
 // Ported rather than adopted wholesale: Rafael's water replaces the reflection
-// RTT with raymarched SSR, which would discard the MGE parity model this file
+// RTT with raymarched ssr, which would discard the MGE parity model this file
 // exists for. Only the caustics travel across.
 vec3 mgeCausticHash(vec3 p)
 {
@@ -328,32 +312,13 @@ float mgeCaustics(vec3 underwaterPos, float time, float waterDepth, vec3 normal,
 
 void main(void)
 {
-    mgeWxCompute(); // single-instance weather decomposition
+    mgeWxCompute();
     vec2 UV = worldPos.xy / (8192.0*5.0) * 3.0;
 
-    // Raw shadow-map term, stock behaviour. Its only consumer is the sun
-    // glint (specular *= shadow * sunSpec.a): an occluder blocking the sun
-    // should kill direct reflection outright, and sunSpec.a already carries
-    // the sunVis cloud signal, so the old cloud-fade line here was near-inert
-    // anyway. MGE XE water receives no geometry shadows at all
-    // (XE Mod Water.fx: zero shadow references) - the glint kill is stock
-    // OpenMW's deliberate improvement, kept as-is.
     float shadow = unshadowedLightRatio(linearDepth);
 
     vec2 screenCoords = gl_FragCoord.xy / screenRes;
 
-    // World-anchor for pattern and region consumers. position.xy is model
-    // space; the radial mesh recentres on the camera every frame, so on the
-    // displaced path model space is camera-relative and every world-intent
-    // consumer - the foam texture, the surge/swash phases, the rain-ripple
-    // pattern, the water-type region boxes - rides the player (reported as:
-    // the foam outline is right, the texture inside moves with the
-    // player). The flat sheet keeps plain position.xy, so the stock tiers are
-    // arithmetic-identical. Note the flat sheet's own anchor is the player
-    // cell centre, not the world origin - the type region boxes have been
-    // tested against cell-relative coordinates since they shipped; that
-    // pre-existing stock-tier finding is logged in 427 and awaits its own
-    // call.
     vec2 mgeWorldXY = position.xy;
 #if MGE_WATER_WAVE_SHAPES && MGE_WATER_DISPLACE
     if (mgeWaterDisplace > 0.5)
@@ -379,11 +344,11 @@ void main(void)
     // Stage 1 of the wave-shape port (docs/water-raymarch-port-plan.md).
     //
     // The coarsest normal-map tap is replaced by the gradient of a real wave
-    // height field. A tiling normal map can only ever repeat; a domain-warped
-    // FBM produces crests with direction and asymmetry, which is what the eye
+    // Height field. A tiling normal map can only ever repeat; a domain-warped
+    // Fbm produces crests with direction and asymmetry, which is what the eye
     // reads as a swell rather than as texture.
     //
-    // Only the gradient is consumed here, so the field's DC offset is
+    // Only the gradient is consumed here, so the field's dc offset is
     // irrelevant at this stage - it cancels in the finite difference. The
     // absolute height does not matter until the raymarch lands.
     // One strength chain for both stages (mge_water_data.glsl,
@@ -401,7 +366,7 @@ void main(void)
     // Gated hard, because this signal is only trustworthy in a narrow band: it
     // needs a seabed actually present in the depth buffer, it degenerates at
     // view-dependent so it can swim as the camera turns. Restricting it to
-    // shallow water keeps it where depth is reliable and where real wave
+    // shallow water keeps it where depth is reliable AND where real wave
     // refraction happens, which is the same place.
     vec2 mgeHeading = normalize(MGE_WAVE_HEADING);
     vec2 mgeOctW = vec2(1.0);
@@ -429,7 +394,7 @@ void main(void)
 
 #if MGE_WATER_WAVE_RAYMARCH
 #if MGE_WATER_DISPLACE
-    // Displaced path: the rasteriser already put this fragment ON the wave
+    // Displaced path: the rasteriser already put this fragment on the wave
     // surface (worldPos is the displaced position), which is the exact
     // question the march exists to approximate - so the march is off and
     if (mgeWaterDisplace < 0.5)
@@ -448,7 +413,7 @@ void main(void)
     // Re-base the normal-map lookup on the displaced position so the fine
     // detail rides the relief instead of sliding across it.
     //
-    // off BY default, and the reason is texture sharpness. texture2D picks its
+    // Off by default, and the reason is texture sharpness. texture2D picks its
     // mip level from screen-space derivatives, and the raymarch terminates at a
     // different t on neighbouring pixels - so dFdx(UV) blows up, the sampler
     // drops to a coarse mip, and the fine ripple texture is blurred away. That
@@ -458,7 +423,7 @@ void main(void)
     // Doing this properly needs explicit-gradient sampling (textureGrad with
     // derivatives taken from the UNdisplaced UV), which is not available at
     // #version 120 without an extension. Until then the detail stays on the
-    // flat basis: the relief still comes through the wave normal, which IS
+    // flat basis: the relief still comes through the wave normal, which is
     // evaluated at the displaced position.
     //
     // Note this keeps our divisor. Rafael's basis is wp.xy / 163840 where ours
@@ -478,7 +443,7 @@ void main(void)
     // scale with waveHeight - storm geometry, calm-soft shading. min() so
     // calm weather stays exactly itself; only storm shading is capped, the
     // displaced geometry keeps full height. Displaced path only: on the
-    // raymarch tier the normal IS the wave and must keep scaling.
+    // raymarch tier the normal is the wave and must keep scaling.
     if (mgeWaterDisplace > 0.5 && MGE_WAVE_SHADE_REF_S > 0.0)
     {
         // open-water glare (W5's own sample set is 200-2500 u of deep
@@ -501,7 +466,7 @@ void main(void)
         mgeWaveN = mgeXeNormal(mgeWavePos.xy, mgeWaveDist, waterTimer);
 #endif
 
-    // shoaling - waves slow in shallow water, so they steepen and break. This
+    // Shoaling - waves slow in shallow water, so they steepen and break. This
     // is the honest substitute for coast-following on this tier: we cannot turn
     // the waves toward the shore (the direction table will not fit - see
     // docs/case-files/coast-following-waves-rp.md), but growing them as they
@@ -674,16 +639,6 @@ void main(void)
                       normal5 * smallWaves.y + rippleAdd);
 
 #if MGE_WAVE_DETAIL_DISTFADE
-    // close-scale normal out by dist/8000, so at distance XE's
-    // reflection offset carries no detail-frequency motion. Keeping
-    // full frequency at every distance strobes the reflection sample
-    // across the RTT's bright/dark content edges - the shade-line
-    // shimmer (single-frame flips, 6-14x edge-concentrated; raced in
-    // simulations/sim_water_edge_flicker.py). Same linear ramp; the
-    // wave-frame base keeps the swell shape at all distances and near
-    // water keeps its relief (6% fade at 500u). Spec inherits the
-    // fade via mgeDetailN - XE-authentic (its spec uses the faded
-    // normal too). 0 = byte-exact full-frequency restore.
     mgeDetail.xy *= 1.0 - clamp(
         distance(position.xyz,
                  (gl_ModelViewMatrixInverse * vec4(0.0, 0.0, 0.0, 1.0)).xyz)
@@ -704,11 +659,6 @@ void main(void)
     // magnitude the wave normal has, and no weight fixes that - raising the
     // detail weight just trades wave shape for texture and back again.
     //
-    // A tangent frame built on the wave normal keeps the micro-detail's full
-    // relative tilt and tilts the whole patch by the wave underneath it, which
-    // is what "the old detailed surface, deformed by the new larger waves"
-    // actually means geometrically. The frame is stable here because a water
-    // surface normal always has z > 0, so it is never parallel to (0,1,0).
     // MGE_WAVE_SHAPE_WEIGHT tilts the base frame toward or away from flat:
     // 1.0 is the field's true slope, below flattens the swells, above
     // exaggerates them. It scales the wave, not the detail, which is what its
@@ -727,7 +677,7 @@ void main(void)
     vec3 cameraPos = (gl_ModelViewMatrixInverse * vec4(0,0,0,1)).xyz;
     vec3 viewDir = normalize(position.xyz - cameraPos.xyz);
     // to the undisplaced surface point. Every from-below term that
-    // classifies the sightline by angle - the fresnel's mirror transition,
+    // Classifies the sightline by angle - the fresnel's mirror transition,
     // the grazing-transmission murk, the sky void fill - reads this one,
     // never the displaced viewDir: a facet's +-35 u of interpolated z
     // swings the displaced direction across those terms' transition bands
@@ -764,7 +714,7 @@ void main(void)
             // toward vertical with grazing + distance. XE never lets a far
             // steep face reach the pow-16 curve - which is what turned
             // isolated crests into the bright mirror patches. Deliberately
-            // unnormalized, as XE has it: far water converges to a smooth
+            // Unnormalized, as XE has it: far water converges to a smooth
             // full reflection (the horizon seal), losing only the sparkle.
             float mgeVDist = length(position.xyz - cameraPos.xyz);
             float mgeWFogA = mgeAWWaterTransmittance(mgeVDist);
@@ -786,9 +736,7 @@ void main(void)
         // The strength-scaled ceiling composes with XE's adjustnormal pair
         // (min of both): the pair owns the distance glare (XE's soft texture
         // normals never produce our steep near faces, so XE needed nothing
-        // more), the ceiling owns the near faces our sharper field creates.
-        // Standing either down alone re-opens its half - 428 stood this one
-        // down and the next test still had strong near glare
+        // more), the ceiling owns the NEAR faces our sharper field creates.
         fresnel = min(fresnel, mix(1.0, MGE_WAVE_FRESNEL_MAX, mgeWaveStr));
 #endif
     }
@@ -798,30 +746,12 @@ void main(void)
         // only near grazing (~79 deg), unlike the physical dielectric term
         // (critical angle 49 deg) which mirrors most of the surface. From
         // below the surface mostly shows the refracted above-water world.
-        // the sim-raced softening menu). The travelling web-free blobs are
-        // mirror patches: the wave field's broad tilt pushes whole regions
-        // past this curve's knee, and the patches march at the field's
-        // 100 u/s travel offset (replicated offline with the real textures,
-        // sim_uw_web_render.py replication gate: 930 px/s with travel, 228
-        // without). From below, the curve therefore reads the detail normal
-        // in the identity frame - the wave base's rotation is left out of
-        // this one dot product. Raced against a re-anchored curve power
-        // (floods the underside with mirror, area 9 -> 69-96%) and a cap
-        // (bites nothing: patch interiors average fresnel 0.29): the
-        // edges 2.5x and dims interiors, with the web untouched - it is
-        // carried by the detail ripple, which this keeps in full. The
-        // grazing mirror stays: the view-angle term still dominates at
-        // grazing. Above water, geometry, foam, fades: untouched.
-        // XE's own input (the composed surface normal) on the flat view
-        // direction. The earlier substitutions here (field tilt out, then
-        // fine-taps-only) were measured invisible in-game once the visible
-        // web was identified as the caustics pass, and were reverted.
         float fcos = clamp(dot(mgeViewBelow, normal), 0.0, 1.0);
         fresnel = pow(clamp(MGE_UW_FRESNEL_BIAS - MGE_UW_FRESNEL_SLOPE * fcos, 0.0, 1.0), MGE_UW_FRESNEL_POWER);
         fresnel *= MGE_UW_REFLECTION_SCALE;   // from-below mirror intensity scale
     }
 
-    // the amplitude knob. Everything the eye reads as wave size arrives through
+    // The amplitude knob. Everything the eye reads as wave size arrives through
     // this one line: the surface normal shifts where the reflection and
     // refraction are sampled, and that shift is REFL_BUMP screen units at most.
     // sin(tilt) is bounded by 1, so no wave table, height field or bump value
@@ -831,7 +761,7 @@ void main(void)
     // Which is why a better normal (the height field) sharpened the character of
     // the waves without making them read as bigger. Magnitude lives here.
 #if MGE_WATER_WAVE_SHAPES
-    // Scaled BY wave strength, not applied flat. At full strength this is
+    // Scaled by wave strength, not applied flat. At full strength this is
     // MGE_WAVE_DISTORT; at Clear (strength ~0.09) it is ~1.0, i.e. stock
     // REFL_BUMP and therefore stock MGE XE reflection behaviour.
     //
@@ -840,18 +770,12 @@ void main(void)
     // MGE XE; and tripling the offset smears the reflected sky across the broad
     // faces of the swells, which is what reads as a plastic highlight.
     vec2 screenCoordsOffset = normal.xy * (REFL_BUMP * mix(1.0, MGE_WAVE_DISTORT, mgeWaveStr));
-    // bound the distortion. This is a screen-space sample offset, and steep
+    // Bound the distortion. This is a screen-space sample offset, and steep
     // crests - especially shoaling ones, which reach ~50deg - push it to ~5% of
     // the screen (200px at 4K), so the refraction samples unrelated geometry.
     // Stock's own damper (BUMP_SUPPRESS_DEPTH, 300u) fades out before shoaling
     // does (700u), so the two never overlap. Cap is well above anything calm
     // weather produces, so Clear is untouched.
-    // Shoaling is excluded from the refraction path. A/B testing confirmed that
-    // the storm refraction artifact was shoaling's: it steepens the normal to
-    // ~50deg, and this offset is a screen-space displacement, so the refraction
-    // sampled ~200px away at 4K. A cap alone was not enough. Dividing the shoal
-    // factor back out keeps the steepening where it belongs - shading, foam and
-    // the visible wave shape - while refraction sees the unshoaled surface.
 #if MGE_WATER_WAVE_SHAPES && @waterRefraction
     screenCoordsOffset /= (1.0 + mgeShoal);
 #endif
@@ -895,24 +819,19 @@ void main(void)
 #endif
 #endif
 #if MGE_WATER_REFL_FILTER
-    // XE's FILTER_WATER_REFLECTION (XE Mod Water.fx:67-80, the "Blur
-    // Water Reflections" mechanism), ported as the shimmer's
-    // RTT's hard bright/dark content edges over the blur radius, so
-    // the offset's strobe becomes a gradient instead of a per-frame
-    // flip. Radius law verbatim: screen-space 0.006*sat(0.11+w/6000),
-    // pixel-circular via the aspect term - ~4.5 px at 500u (near
-    // swing x0.34, raced in sim_water_edge_flicker's blur arm), 23 px
-    // far (x0.07). Tap set verbatim; the ramp denominator deviates
-    // from XE (3000 vs 6000) per the mid-band ruling.
     // 0 = single-tap byte-exact restore.
     float mgeReflFW = linearizeDepth(gl_FragCoord.z, near, far);
-    float mgeReflFR = 0.006 * clamp(0.11 + mgeReflFW / 3000.0, 0.0, 1.0); // 6000 in XE; halved on the mid-band ruling (deviation)
+    float mgeReflFR = 0.006 * clamp(0.11 + mgeReflFW / 3000.0, 0.0, 1.0);
     // beyond the detail fade's reach the flicker has no driver, so
     // blur there is pure sharpness cost. Wind the radius back down
     // over 6000..12000 (the fade's own end) - at and below 6000 the
     // profile is untouched, past 12000 reflections are single-tap
-    // sharp. Release aligned to MGE_WAVE_DETAIL_FADE_END by design.
-    mgeReflFR *= 1.0 - clamp((mgeReflFW - 6000.0) / 6000.0, 0.0, 1.0);
+    // sharp. Release aligned to MGE_WAVE_DETAIL_FADE_END by design,
+    // so it stretches with MGE_WAVE_FAR_SCALE as the fade does.
+    mgeReflFR *= 1.0 - clamp((mgeReflFW - 6000.0 * MGE_WAVE_FAR_SCALE) / (6000.0 * MGE_WAVE_FAR_SCALE), 0.0, 1.0);
+    float mgeReflMidW = smoothstep(1335.0, 2670.0, mgeReflFW)
+                      * (1.0 - clamp((mgeReflFW - 6000.0 * MGE_WAVE_FAR_SCALE) / (6000.0 * MGE_WAVE_FAR_SCALE), 0.0, 1.0));
+    mgeReflFR *= mix(MGE_WATER_REFL_BLUR_SCALE, MGE_WATER_REFL_BLUR_MID_SCALE, mgeReflMidW);
     vec2 mgeReflRadius = vec2(mgeReflFR, mgeReflFR * (screenRes.x / screenRes.y));
     vec2 mgeReflUV = mgeReflBase + mgeReflOff;
     vec3 reflection = (sampleReflectionMap(mgeReflUV).rgb
@@ -945,9 +864,9 @@ void main(void)
         reflection = mix(mgeUwFogColour(), reflection,
             mgeUwTrans(length(position.xyz - cameraPos.xyz)));
 
-    // void guard, both tiers (see MGE_UW_MIRROR_RAMP above): at the crossing
+    // Void guard, both tiers (see MGE_UW_MIRROR_RAMP above): at the crossing
     // the flipped reflection RTT is black void wherever the mirrored ray hits
-    // nothing, and the UW fresnel spikes on ripple back-faces exactly there.
+    // nothing, and the uw fresnel spikes on ripple back-faces exactly there.
     // The distance fade above cannot help - at the crossing the surface is
     // centimetres away, exp(-0/D) = 1, raw RTT. Blend from murk at zero
     // submersion back to the (already murk-faded) RTT with depth. gl_Fog.color
@@ -1029,12 +948,6 @@ void main(void)
     if (cameraPos.z > 0.0 && realWaterDepth <= VISIBILITY_DEPTH && waterDepthDistorted > VISIBILITY_DEPTH)
         screenCoordsOffset = vec2(0.0);
 #if MGE_UW_REFR_EDGE_GUARD
-    // depth-guarded on the underwater side - ripple offsets sampled
-    // the above-water RTT across silhouettes (bright halos, washed
-    // thin objects under a dark sky; smooth surface = no offset = no
-    // artifact). Zero it where the distorted sample crosses a large
-    // depth break; the smooth-surface look is the correct one is the
-    // fallback by construction. See MGE_UW_EDGE_DEPTH.
     if (cameraPos.z < 0.0
         && abs(depthSampleDistorted - depthSample) > MGE_UW_EDGE_DEPTH)
         screenCoordsOffset = vec2(0.0);
@@ -1063,15 +976,6 @@ void main(void)
         // stock-OpenMW `* 1.5` ("brighten up the refraction underwater")
         // MGE's UnderwaterPS has no such gain (parity notes, entry of
         // only dims. Affects both tiers identically (shared file).
-        // onto XE's own exp(-dist/500) for parity, and the next dive
-        // showed exactly the artifact the split was warned to cause
-        //: a hard bright band across the underside of
-        // the surface with light streaks jittering above it. Three terms -
-        // this refraction, the from-below reflection, and the scene fog -
-        // must fade at one rate or the eye sees the edges between them
-        // an incoherence between separately-faded terms rather than a bad
-        // formula in any one of them). XE gets away with the split because
-        // its underwater scene fog is linear and its surface is softer;
         // on our exponential medium it does not survive contact.
         refraction = mix(mgeUwFogColour(), refraction,
             mgeUwTrans(uwDist));   // shared owner: scene fog + both surface fades
@@ -1087,25 +991,6 @@ void main(void)
                                     mgeViewBelow.z));
 #endif
 
-        // void fill. The refraction RTT's sky coverage ends at the
-        // atmosphere dome's lower rim; between that rim and the waterline
-        // the RTT holds only its clear colour - black - because no sky
-        // geometry exists at those angles, so no sky-shader fix can ever
-        // paint it (the band seen below the ashstorm dome). The
-        // refraction depth identifies sky-region texels: nothing wrote
-        // depth there, so it reads the far plane - which also matches the
-        // dome's own texels (the sky renders without depth writes), so the
-        // fill must not be unconditional or it would murk the legitimate
-        // steep-up sky. Physics supplies the gate: from below, sky is only
-        // visible inside the Snell window (steep views); at grazing the
-        // surface shows the water's own medium. Fill toward murk as the
-        // view flattens - full below viewDir.z 0.2 (where the black band
-        // and the mis-scattered dome rim live), none above 0.45 (a diver
-        // looking up keeps the true sky). MGE's own generous window (its
-        // UW fresnel knees at ~79 deg) sits inside the kept range. Both
-        // tiers.
-        // murk above - sky-backed pixels are the cloud view where the
-        // reported travelling patches lived.
         if (depthSampleDistorted > far * 0.9)
             refraction = mix(gl_Fog.color.rgb, refraction,
                              smoothstep(0.2, 0.45, mgeViewBelow.z));
@@ -1156,7 +1041,7 @@ void main(void)
             // MGE's waterCaustics by a per-weather multiplier, and its
             // caustics table is identical to its waveHeight table in all ten
             // weathers (0.1 foggy .. 2.0 thunder, verified in its config.lua)
-            // - so the multiplier IS our weather wave scale, whose wind curve
+            // - so the multiplier is our weather wave scale, whose wind curve
             // already reproduces that table, transition-blended by the engine.
             // Interiors take 1.0, as the original hardcodes: full strength,
             // which is deliberately stronger than a clear day outside (0.2).
@@ -1177,7 +1062,7 @@ void main(void)
         // pow(depthscale, 90), and the refraction keeps
         // 0.8*depthscale + 0.2*shorefactor of the frame.
         //
-        // Replaces stock's DEPTH_FADE/visibility rational curve, which was
+        // Replaces stock's DEPTH_FADE/VISIBILITY rational curve, which was
         // measured much faster than XE's despite carrying the larger
         // constant (2500 vs 800): body-colour weight at 100 u of water was
         // 0.66 against XE's 0.29, at 400 u 0.90 against 0.52. Comparing the
@@ -1190,18 +1075,6 @@ void main(void)
                          clamp(0.8 * mgeDepthScale + 0.2 * mgeDepthShore,
                                0.0, 1.0));
 #if MGE_WATER_WAVE_SHAPES
-        // risen against a shore or sky silhouette samples refraction texels
-        // the refraction camera never wrote (it clips everything above the
-        // waterline), so the depth reads the far plane and the mix above
-        // paints the deep-water body colour mid-break. Original XE
-        // structurally cannot show this (its "refraction" is the borrowed
-        // framebuffer - always real content behind a wave face). 429's
-        // stand-in was the reflection, which at sunset is bright orange sky
-        // (the second report). v2 resamples at the undisplaced surface
-        // position instead - that column exists in the RTT and shows the
-        // actual seabed, true continuity with the neighbouring water; the
-        // depth-blend result (the body colour) stays only as the last
-        // resort when even that column is unwritten.
         if (depthSample > far * 0.9)
         {
 #if MGE_WATER_DISPLACE
@@ -1236,11 +1109,11 @@ void main(void)
     vec2 mgeDrift2 = vec2(waterTimer * 0.0010, -waterTimer * 0.0040) * MGE_FOAM_DRIFT;
     vec2 mgeDrift3 = vec2(-waterTimer * 0.0025, waterTimer * 0.0015) * MGE_FOAM_DRIFT;
 
-    // slosh - the term that makes foam move, and the answer to "it flashes
+    // Slosh - the term that makes foam move, and the answer to "it flashes
     // faster rather than moving faster".
     //
     // Not a drift: real foam has none. MGE XE's foam UVs are bare world
-    // position (tex3D(sampWater3d, float3(IN.pos.xy / 45, time)), XE
+    // position (tex3D(sampWater3d, float3(in.pos.xy / 45, time)), XE
     // Water.fx:494) and all the motion it shows comes from the surface normal
     // oscillating the shoreline term. A uniform advection along the heading was
     // tried here first and read as foam streaming away from every shore - a
@@ -1256,7 +1129,7 @@ void main(void)
     // identically. One world-unit offset shared by all three layers, scaled
     // per layer below so all three surge the same world distance.
     //
-    // constructed, not borrowed - both borrowed signals failed in-game.
+    // Constructed, not borrowed - both borrowed signals failed in-game.
     // normal0 swirled ("oil in a puddle"): its ripples vary at the foam
     // features' own scale, so adjacent pixels displaced in different
     // directions - a domain warp. mgeWaveN still swirled ("diesel spilled
@@ -1284,7 +1157,7 @@ void main(void)
     // per-weather table the waves use, so foam and sea state stay in step, and
     // it is available on both tiers (the pre-wave build has no mgeWaveStr).
     float mgeFoamRate = 1.0 + mgeWeatherWaveScale() * MGE_FOAM_STORM_RATE;
-    // Note: the gray pulses are a density oscillation - how much foam exists.
+    // NOTE: the gray pulses are a density oscillation - how much foam exists.
     // Speeding them up makes foam blink on and off; it does not make it move.
     // All in-place visibility rates - both pulses and the morph - share the
     // MGE_FOAM_CHURN dial: at Liam's rates (churn 1.0) the three multiplied
@@ -1310,18 +1183,6 @@ void main(void)
     float mgeFoamPat = smoothstep(0.0, MGE_FOAM_CONTRAST, mgeFoamR);
 
 #if MGE_FOAM_CREST_FIELD && MGE_WATER_WAVE_SHAPES && MGE_WATER_WAVE_RAYMARCH
-    // old mask's field arm never reached its window (the field's slopes
-    // are too mild - coverage 0.00-0.1% at every strength), so the
-    // texture arm painted round drifting blobs uncorrelated with the
-    // crests. Here: the marched relief height (free - the raymarch
-    // already computed it) against an absolute breaking height, which
-    // also gives the weather ladder for free (the field's spread grows
-    // with sea state); a leading-face bias (n.xy = -grad: the front
-    // face of a crest travelling along travelDir has
-    // dot(n.xy, travelDir) > 0); slope as a bonus, not a gate. The old
-    // texture mask survives at MGE_FOAM_CREST_TEX as breakup. Raced in
-    // simulations/sim_foam_crest_shape.py (ribbons, elongation ~2.3,
-    // aligned with the crest lines, travelling with the crests).
 #if MGE_WATER_DISPLACE
     // Displaced path: the relief height is the vertex displacement itself,
     // handed over as a varying - the march input's exact replacement (and
@@ -1382,7 +1243,7 @@ void main(void)
     // Shore foam: peaks just off the waterline and is gone by MGE_FOAM_SHORE_DEPTH.
     float mgeShoreF = 0.0;
 #if @waterRefraction
-    // occluder rejection (the pole-halo fix). realWaterDepth comes from the
+    // Occluder rejection (the pole-halo fix). realWaterDepth comes from the
     // refraction depth buffer, and a submerged pole writes its surface into
     // that buffer - the water in front of it reports "shallow" and grows a
     // foam outline. Width is the discriminator: a real shore is shallow for
@@ -1390,27 +1251,7 @@ void main(void)
     // +-MGE_FOAM_OCCLUDER_R world units, horizontal in screen space (vertical
     // offsets at grazing angles span enormous along-plane distances).
     //
-    // The taps produce a multiplicative suppression, not a remapped band
-    // depth. The first shipment fed max(centre, min(L,R)) straight into the
-    // band and there were hard diagonal seams: the refraction camera clips
-    // everything above the water plane (ClipCullNode, mwrender/water.cpp:53),
-    // so land above the waterline is not "shallow" in this buffer - it is
-    // far-plane deep - and every waterline or LOD step the taps cross made
-    // min(L,R) jump, transplanting a hard edge 55 wu sideways. A function of
-    // discontinuous data only renders smoothly if its sensitive range sits
-    // where the data cannot jump across it: on a monotone shore
-    // min(L,R) <= centre <= band reach, so a suppression window starting AT
-    // the band's reach is identically zero wherever legitimate shore foam
-    // exists (simulated across slopes 0.05-1.0: exactly 0 in-band), and only
-    // a shallow reading flanked by beyond-band water on both sides - the
-    // artifact set - can enter it. Known accepted costs: a pole standing
-    // inside the active surf zone keeps its foam (it is in surf), and
-    // channels narrower than ~2R lose shore foam.
     //
-    // World -> screen via the projection diagonal, the fog.glsl:254 recipe
-    // (verified in-game there); not the depth gradient, which is
-    // piecewise-constant per terrain quad and produced the square facets that
-    // killed coast-following (case file coast-following-waves-rp.md).
     float mgeTapUV = min(MGE_FOAM_OCCLUDER_R * gl_ProjectionMatrix[0][0]
                          * 0.5 / max(surfaceDepth, 1.0), 0.2);
     float mgeShoreDepthL = linearizeDepth(sampleRefractionDepthMap(
@@ -1426,9 +1267,9 @@ void main(void)
                                       MGE_FOAM_BAND_REACH + MGE_FOAM_OCCLUDER_FADE,
                                       mgeOccluderDeep);
     float mgeFoamDepth = realWaterDepth * mgeViewFactor;
-    // swash window - a backstop against deep water being swash-dragged into
+    // Swash window - a backstop against deep water being swash-dragged into
     // the band, fading across [window/2, window] x SHORE_DEPTH, deliberately
-    // beyond the band's ~92-unit reach so the shore keeps its full dynamics.
+    // Beyond the band's ~92-unit reach so the shore keeps its full dynamics.
     // The fade width must exceed 1.5x the swash amplitude or the depth-to-foam
     // mapping folds and the band splits into two layers with a hard edge -
     float mgeSwashGate = 1.0 - smoothstep(MGE_FOAM_SHORE_DEPTH * (0.5 * MGE_FOAM_SWASH_WINDOW),
@@ -1441,16 +1282,6 @@ void main(void)
     // that is the difference between surf and a conveyor. The normal taps scroll,
     // so at any fixed point this rises and falls as the swell passes.
 #if MGE_FOAM_SWASH_V2
-    // (+-40..47 u on a 45-u band with a 5-u inner ramp) punched round
-    // travelling no-foam holes through the band and folded its profile
-    // into split strips with pixel-hard edges - measured on the real
-    // texture in simulations/sim_foam_shore_band.py, matching the
-    // report verbatim. V2: a constructed 1-D surge along the heading
-    // (the foam-surge construction and K/W - coarse, smooth, curl-free;
-    // pure ALU, both tiers) + the texture term at a quarter amplitude
-    // (organic breakup that can no longer punch through or fold) + a
-    // widened inner ramp below. Raced: enclosed holes 5 -> 0,
-    // hard-edge fraction 22.7% -> 0.0%, folds 85% -> 33% (soft).
     // the shores-too-bare report): amplitude, reach and motion each
     // ride the weather - surf foam needs waves; a glassy pond keeps a
     // gently-breathing waterline band and loses the offshore mass.
@@ -1533,16 +1364,6 @@ void main(void)
     gl_FragData[0].rgb += specular * sunSpec.rgb + rainSpecular;
 
     // term (XE Mod Water.fx:267-270), never ported until now:
-    //   spec = sunColAdjusted * pow(dot(-EyeVec, normalize(-sunPos + normal)), 6) * exp(-dist/4096)
-    // A broad sun glow through the surface, rippled per pixel by the
-    // normal. It is the underside's only content-independent texture: our
-    // web is folded content edges, so over smooth content (cloud
-    // interiors, terrain masses in the refraction) the underside read as
-    // naked webless slicks - the travelling "oil spills". XE never
-    // shows them naked because this glow textures everything. Verified in
-    // the replication render: slick-interior texture energy goes from
-    // zero to web-comparable with the term on (sim_uw_web_render round,
-    // as everywhere else in this shader.
     if (cameraPos.z < 0.0)
     {
         float mgeRefrSun = clamp(dot(-viewDir,
@@ -1578,15 +1399,6 @@ void main(void)
 #if MGE_WATER_DISPLACE
     if (mgeWaterDisplace > 0.5)
     {
-        // Displaced path: the stock wobble fakes a moving waterline on a
-        // static sheet - with real geometry the line already moves, and the
-        // painted wobble rides the real waves on top of it (the reported
-        // "malleable edge", a double wobble). Duty transferred to XE's own
-        // shore treatment (XE Mod Water.fx:226-229 + :262): depth plus the
-        // small-scale shoreline animation term 300*(0.95 - normal.z) - the
-        // real wave normal now, so the line breathes with the actual waves -
-        // through the sharp exp fade, blending the last units of depth into
-        // the refraction (wet ground) instead of a hard sweeping edge.
         float mgeShoreDepth = verticalWaterDepth + 300.0 * (0.95 - normal.z);
         float mgeShoreFactor = pow(clamp(exp(-mgeShoreDepth / 800.0), 0.0, 1.0), 90.0);
         // keep the two shipped guards: never raw refraction at grazing
@@ -1621,7 +1433,7 @@ void main(void)
     gl_FragData[0] = vec4(sampleReflectionMap(screenCoords).rgb, 1.0);
     return;
 #endif
-// ==== end TEMP water probe ====
+// ==== end temp water probe ====
 
 #if @radialFog
     float radialDepth = distance(position.xyz, cameraPos);

@@ -2,7 +2,7 @@
 #define MGE_WATER_DATA_GLSL
 
 // ---------------------------------------------------------------------------
-// Water tuning data, the compile-time half of the water configuration.
+// Water tuning data; the compile-time half of the water configuration.
 //
 // Everything the core water shader needs lives here, because core shaders
 // cannot receive Lua uniforms and so cannot be driven from the in-game Scripts
@@ -13,10 +13,6 @@
 //                                            clarity, vampire sun damage
 //   F2 -> MGE_Underwater_Effects             depth-clarity intensities
 //
-// Feature sources: weather-driven waves and depth clarity after NullCascade's
-// the MWSE weather-driven water mod; caustics, water types and foam after Rafael's
-// "Enhanced Water for OpenMW". Both re-implemented for this stack rather than
-// ported verbatim.
 // ---------------------------------------------------------------------------
 
 // ---- feature switches (1 = on) --------------------------------------------
@@ -27,19 +23,36 @@
 #define MGE_FOAM_VOLUME           0   // 1 = real MGE XE frames from a 4x4 atlas
                                       //     in the alpha; 0 = offset cross-dissolve
 #define MGE_FOAM_DEBUG            0   // paint R=foam texture G=drive B=foam
-#define MGE_FOAM_CREST_FIELD      1   // field-driven whitecaps;
-                                      // 0 = the texture-driven mask
-#define MGE_FOAM_SWASH_V2         1   // constructed 1-D swash;
+#define MGE_FOAM_CREST_FIELD      1
+                                      // 353/354); 0 = the texture-driven mask
+#define MGE_FOAM_SWASH_V2         1
                                       // 0 = the texture-driven swash
 #define MGE_UW_REFR_EDGE_GUARD    1   // from-below refraction edge guard
 #define MGE_UW_GRAZE_MURK         1   // from-below grazing-transmission murk
+#define MGE_WAVE_FAR_SCALE        1.0 // stretch of every fragment-side wave
+                                      // distance: the octave LOD ramps, the
+                                      // detail-normal fade end, the blur
+                                      // release band. 1.0 = the shipped law;
+                                      // the Full build runs 2.0 with its
+                                      // doubled displaced-geometry reach
+                                      // geometry keep XE's split at every
+                                      // distance. deploy_water overrides.
 #define MGE_WAVE_DETAIL_DISTFADE  1   // fade detail-normal xy to 0 by
                                       // FADE_END (XE getFinalWaterNormal
-const float MGE_WAVE_DETAIL_FADE_END = 12000.0; // XE 8000 x1.5
+const float MGE_WAVE_DETAIL_FADE_END = 12000.0 * MGE_WAVE_FAR_SCALE;
 #define MGE_WATER_REFL_FILTER     1   // XE FILTER_WATER_REFLECTION port
                                       // (six-tap reflection blur, the
                                       // shimmer's sampling-side remedy,
-
+#define MGE_WATER_REFL_BLUR_SCALE 1.0 // multiplier on the six-tap radius
+                                      // at every distance (near, mid and
+                                      // the far release alike); 1.0 = the
+                                      // XE law. Per-tier: the Full build
+                                      // deploy_water.py overrides on write
+#define MGE_WATER_REFL_BLUR_MID_SCALE 1.0 // the mid band's own multiplier: the
+                                      // radius plateau between the near ramp's
+                                      // end (~2670 u) and the far release.
+                                      // blur back to 1" - near and far keep
+                                      // MGE_WATER_REFL_BLUR_SCALE
 // From below, the refraction offset was never depth-guarded (the shore
 // nullifier is cameraPos.z > 0 only), so ripple offsets sample the
 // above-water RTT across object silhouettes: thin bright halos around
@@ -61,7 +74,7 @@ const float MGE_UW_EDGE_DEPTH = 2500.0;
 // angles rendered raw against the murk-filled backdrop. One shared
 // ramp for every from-below refraction texel: objects and backdrop
 // fade together into the medium as the view flattens; a diver looking
-// steeply up (viewDir.z above the HI edge) keeps the true sky and
+// steeply up (viewDir.z above the hi edge) keeps the true sky and
 // crisp objects.
 #if MGE_UW_GRAZE_MURK
 const float MGE_UW_GRAZE_LO = 0.10;   // full murk at/below this viewDir.z
@@ -116,7 +129,7 @@ const float MGE_UW_GRAZE_HI = 0.55;   // untouched above this
 // Our field's shading slope at strength 0.5 reproduces that distribution
 // (6.4/17.4 measured). So the displaced path's shading-normal strength is
 // min(true, this) - calm stays calm, storms keep their geometry but shade
-// XE-soft. Raymarch tier unaffected (there the normal IS the wave and must
+// XE-soft. Raymarch tier unaffected (there the normal is the wave and must
 // scale). 0.0 = shading follows the field on both paths, byte-exact.
 // a soft gel: deep-water shading tilt ran 0.46x the raymarch tier's, the
 // same halving that cost the surf its life inshore. It was bought for
@@ -127,61 +140,30 @@ const float MGE_UW_GRAZE_HI = 0.55;   // untouched above this
 // softer baked normals; 1.0 (freeze off) is available and also clean.
 #define MGE_WAVE_SHADE_REF_S      0.8
 
-// own water_NRM volume texture as the displaced path's height and shading
+// own water_NRM volume texture as the displaced path's height AND shading
 // field - the original Wonders-of-Water sea verbatim. a = height, rg = the
 // baked shading normals (amplitude-frozen by construction - XE's storm
 // trick), w = time (0.4*time, a 2.5 s loop). Displacement scales:
-// 1104/3900 u blended by dist/8000; shading adds the 527 u close scale
-// (getFinalWaterNormal). Runtime-gated by mgeWaterXeField, which the fork
-// feeds 1 only when the volume actually loaded - asset absent means the
-// procedural field serves, never black water. Raced in
-// simulations/sim_xe_field_race.py: our 384x120 mesh samples this field
-// better than XE's own 150x120 at every radius, so the window is XE's
-// verbatim 6400. 0 = the procedural-field displaced path, byte-exact.
 //
 // cauldron"): measured, the texture's real features are 70-140 u (the
 // 1104 is only the tiling period), morphing in place at every scale and
 // decorrelating within ~a second - it structurally cannot travel (the
 // morph destroys pattern identity faster than its ~55 u/s drift) and has
-// no long swells. Rendered as geometry that IS a boiling cauldron. The
+// no long swells. Rendered as geometry that is a boiling cauldron. The
 // texture stays shipped for its measured statistics (amplitude reference,
 // the frozen-shading distribution ported in 430) and as a comparison
 // toggle; the procedural field - travelling, directional, longer-waved
 // than XE's real content - is the displacement.
 #define MGE_WATER_XE_FIELD        0
 
-// waves coming back and forth during storm - is desirable"). The depth
-// attenuation keeps a small floor near the waterline so surf washes a
-// bounded distance up the beach and exposes a thin retreating strip -
-// raced at storm extremes: on a 0.05-slope beach ~90 u of breathing swash
-// + ~50 u of run-up, surface never more than 2.5 u below the seabed
-// (a receding film, not a gaping trough); full waves still past 90 u of
-// depth, and inland crest patches stay impossible (the floor caps crest
-// reach at ~7 u above the plane). Scales with weather through the field
-// itself. 0.0 = the static waterline (the pure 434 attenuation).
 const float MGE_WAVE_SHORE_WASH = 0.15;
 // Displacement is capped at the amplitude the local water column can hold:
-// att <= (depth - margin) / MAX, so a trough bottoms out margin units above
-// the seabed by construction instead of by a fitted ramp. MAX is the storm
-// field's trough magnitude with headroom (the battery measures -48.1 u at
-// the 0.1 percentile); margin is the receding-film allowance W3 permits.
 // MGE XE's from-above water depth fade (XE Mod Water.fx:196-200).
 // Measured against stock's rational curve: ours reached the body colour
 // far sooner despite the larger constant, so adopting XE's exponential
 const float MGE_XE_DEPTH_SCALE = 800.0;
 const float MGE_XE_DEPTH_SHORE_POW = 90.0;
 const float MGE_WAVE_COLUMN_MAX = 55.0;
-// kind behind the outline, while ensuring no angular breaking appears and
-// the waves oscillation is synchronous with the foam, while somewhat lesser
-// than it"). Inside the surf band the multi-octave field hands over to a
-// single smooth 1-D surge running on the foam's own phase constants, and it
-// is strictly non-positive: the surface can recede and return but can never
-// rise over dry ground, which is the grey edge's trigger ("appears when
-// water goes beyond its limit"). Raced in sim_water_shore_mirror --race:
-// The shore surge and the foam swash keep their own 138.3 u/s: they are
-// the same construct (the surge runs on MGE_FOAM_SURGE_K/_W by design, so
-// they stay synchronous by design), and MGE_FOAM_SURGE_W is read by
-// the foam on both tiers - speeding it would be an undeclared RP change.
 const float MGE_WAVE_SURGE_AMP  = 12.0;  // world units of recession at storm
 const float MGE_WAVE_SURGE_BAND = 40.0;  // depth over which it hands over
 const float MGE_WAVE_COLUMN_MARGIN = 2.0;
@@ -191,20 +173,6 @@ const float MGE_WAVE_COLUMN_MARGIN = 2.0;
 // fragment fetches its reflection as its elevation varies - content
 // reads as continuous when d(sample)/d(elev) stays near 1:
 //   raw (as XE has it)   1.21 departure, slope goes negative (-0.21):
-//                        the lookup folds back on itself - a hard edge,
-//                        and the source of the "unmurked reflection
-//                        above the horizon" family (434, 438)
-//   capped at own elev   pins 100% of above-horizon samples onto the
-//                        horizon row - vertical smears
-//   faded by elevation   0.90 departure at 0.02 rad - the reported
-//                        cut; and no width helps,
-//                        because at swim height the entire visible sea
-//                        lies within ~3 deg of the horizon, so a fade
-//                        broad enough to be smooth has already removed
-//                        the clamp everywhere it is being looked at
-//   off                  0.00 departure - continuous by construction
-// So the clamp is off on the displaced path, which is exactly the planar
-// lookup the raymarch tier has always used and has not been faulted.
 // A deliberate XE deviation, and the only form that does not draw a line
 // somewhere. 1 restores it for comparison.
 #define MGE_WATER_REFL_CLAMP 0
@@ -253,18 +221,10 @@ const float MGE_WAVE_SHADE_SHALLOW = 200.0;
 // ground-truth line, which computes the same kernel from the full table in Lua.
 #define MGE_SHORE_DEBUG           0
 
-// The per-weather amplitude multipliers were a hand-tuned table (NullCascade
-// derived from the game's own per-weather wind speeds
-// (fallback=Weather_*_Wind_Speed, the same values the engine drives cloud
-// motion with), through one response curve fitted so the calm-range anchors
-// storm saturates the wave field exactly as before. Deliberate look changes
-// a glassy sea under snowfall (the 0.35 taste value is retired); storm foam
-// churns slightly faster for Ash/Blight/Blizzard (they cap at Thunder's
-// level instead of sitting below it, their wind is higher than Thunder's).
 // Weather blends happen in wind, which the engine itself lerps linearly
 // through transitions; the curve applies once, after the blend.
 // uniform - the engine broadcasts the blended authored wind to every
-// shader on both tiers, so waves read it directly and NO reconstruction
+// shader on both tiers, so waves read it directly and no reconstruction
 // from fog signals remains in the wave path. The constants below are the
 // per-weather anchor table: reference data for the queued
 // wind-observation round of the weather decomposition (and the human-
@@ -282,13 +242,6 @@ const float MGE_WIND_SNOW     = 0.00;
 const float MGE_WIND_BLIZZARD = 0.90;
 // WX_WIND_END
 // The wind -> wave-multiplier response curve:
-//   wave = min(base + gain * wind^3, cap)
-// Cubic because the retired table's calm range demands it (wind 0.2 -> wave
-// 0.4 but wind 0.3 -> wave 1.2: tripling across one step). cap bounds the
-// derived value where the old table topped out, the wave field saturates at
-// strength 1.0 regardless, but mgeFoamRate consumes this scale raw, so an
-// uncapped cubic would run storm foam at 10x. Every wind >= ~0.36 caps: all
-// four storms, matching the old saturation behaviour.
 const float MGE_WAVES_WIND_BASE = 0.06;
 const float MGE_WAVES_WIND_GAIN = 42.0;
 const float MGE_WAVES_WIND_CAP  = 2.0;
@@ -298,8 +251,6 @@ const float MGE_WAVES_WIND_CAP  = 2.0;
 // 2.0 at Thunderstorm, so 0.5 maps a full thunderstorm to open-sea strength and
 // keeps every other weather proportional. Raise it to make all weathers rougher
 // (they saturate at 1.0 together); lower it for a calmer world overall.
-// 0.7 rather than 0.5: it lets every storm (Ash 1.5, Blight 1.8, Thunder 2.0)
-// reach full field strength after the water-type multiply, instead of sitting
 const float MGE_WAVES_SHAPE_SCALE = 0.7;
 
 // Below this strength the wave field is switched off entirely and the surface
@@ -310,7 +261,7 @@ const float MGE_WAVES_SHAPE_SCALE = 0.7;
 // and up still ramp smoothly instead of jumping.
 const float MGE_WAVE_CALM_FLOOR = 0.10;
 
-// Overall wave size, ON top of the 0..1 weather strength.
+// Overall wave size, on top of the 0..1 weather strength.
 //
 // Strength saturates at 1.0 - Thunderstorm on open sea already reaches it - so
 // once there, raising the weather table buys nothing. This scales the height
@@ -325,9 +276,6 @@ const float MGE_WAVE_CALM_FLOOR = 0.10;
 // How fast the wave field itself travels. Amplitude already rises with the
 // weather, and a bigger sea moving at the same rate reads as unnaturally quick,
 // so this trims the whole field's speed. Applies at every strength.
-// which is 69% of the deep-water gravity-wave speed for its own
-// wavelength (sqrt(g*lambda/2pi) = 201.6 u/s at 64 units = 1 yard) - a
-// true observation, and not the owner of the reported "too viscous" reading.
 // This constant is tier-shared, the raymarch tier runs the identical
 // 138.3 u/s, and RP does not read as viscous to him. A symptom present
 // on one tier cannot be owned by a quantity both tiers share: the owner
@@ -345,7 +293,7 @@ const float MGE_WAVE_AMPLITUDE = 1.4;
 // swells are what stop a sea reading as corrugated iron. The problem with his
 // values is that the spread is unbounded - dir1 (-0.67, +0.74) against dir2
 // (+0.39, -0.92) is a dot of -0.94, i.e. one octave running very nearly
-// backwards. Combined with the distance LOD, which fades octaves 3-5 out with
+// Backwards. Combined with the distance LOD, which fades octaves 3-5 out with
 // range, the mix of headings changes with distance too, so near water and far
 // water visibly disagree about which way the sea is going.
 //
@@ -360,7 +308,7 @@ const float MGE_WAVE_SPREAD = 32.0;
 // docs/water-raymarch-port-plan.md for why this is two problems and why the
 // Full tier will solve the first one differently (a baked shore field).
 //
-// shore = 1: waves come ashore on every coast, via the baked coastline table
+// Shore = 1: waves come ashore on every coast, via the baked coastline table
 // (mge_shore_data.glsl, generated per load order by scripts/bake_coastline.py)
 // and a wave rose - six fixed global swell directions whose per-pixel energy
 // weights favour the train travelling toward the local shore.
@@ -378,7 +326,7 @@ const float MGE_WAVE_SPREAD = 32.0;
 // Coast influence only exists near the player (the swells are only readable
 // there, and this caps the per-pixel table walk). World units.
 const float MGE_SHORE_ACTIVE_RANGE = 24576.0;   // 3 cells around the player
-// Distance-to-coast band: full shoreward energy inside near, none past far.
+// Distance-to-coast band: full shoreward energy inside NEAR, none past FAR.
 const float MGE_SHORE_COAST_NEAR = 4096.0;
 const float MGE_SHORE_COAST_FAR  = 20480.0;
 // How decisively energy concentrates on the best-aligned train. Higher =
@@ -420,7 +368,7 @@ const vec2 MGE_WAVE_HEADING = vec2(-0.5299989, 0.8479983);
 const float MGE_WAVE_TRAVEL = -1.0;
 
 // The wave field's travel speed, in world units per second - a reference
-// quantity for tuning notes, consumed by nothing at present. derived, not
+// quantity for tuning notes, consumed by nothing at present. Derived, not
 // chosen: octave 1 samples the noise at worldXY * 0.003 * 0.77 * 1.164, so one
 // noise unit spans 371.9 world units, and its argument advances by
 // waterTimer * 0.6 * MGE_WAVE_SPEED. 371.9 * 0.6 * 0.62 = 138.3 world units/s,
@@ -476,10 +424,6 @@ float mgeWeatherWaveScale()
     w = min(MGE_WAVES_WIND_BASE + MGE_WAVES_WIND_GAIN * w * w * w,
             MGE_WAVES_WIND_CAP);
 
-    // Interiors. The water-type resolve already multiplies by
-    // MGE_TYPE_INTERIOR.x further down, so this term must stay neutral or the
-    // interior factor lands twice (the old code applied 0.5 here and 0.5 there,
-    // giving 0.25). Interior calm is owned by MGE_TYPE_INTERIOR.x alone.
     float isExterior = clamp(mgeGetFogParams().z, 0.0, 1.0);
     w = mix(MGE_WAVES_INTERIOR, w, isExterior);
 
@@ -508,7 +452,7 @@ float mgeWaveStrengthResolve(vec2 wxy)
     }
 #endif
     // Map the weather multiplier (0.1 Foggy .. 2.0 Thunderstorm) onto the 0..1
-    // strength the height field expects. scaled, not clamped: a bare clamp to
+    // strength the height field expects. Scaled, not clamped: a bare clamp to
     // 1.0 would flatten Ashstorm 1.5, Blight 1.8 and Thunderstorm 2.0 onto the
     // same value and destroy exactly the distinction the table exists to make.
     s = clamp(s * MGE_WAVES_SHAPE_SCALE, 0.0, 1.0);
@@ -563,14 +507,14 @@ const vec4 MGE_TYPE_SULPHUR  = vec4(0.40, 0.65, 0.50, 0.0);
 const vec4 MGE_TYPE_TROPICAL = vec4(0.80, 1.00, 0.60, 0.0);
 const vec4 MGE_TYPE_INTERIOR = vec4(0.50, 0.00, 0.60, 0.0);
 
-// Regions, in world units, as corner pairs, order does not matter, the shader
+// Regions, in world units, as corner pairs; order does not matter, the shader
 // normalises them. Each blends into the surrounding sea over its own blend
 // distance (negative = the blend happens inside the box, so the border never
 // shows as a line). Coordinates are Rafael's from "Enhanced Water for OpenMW",
 // which are playtested against the real Vvardenfell map; do not replace them
 // with estimates.
 //
-// The vvBox is a cheap bounding test around every Vvardenfell region, water
+// The vvBox is a cheap bounding test around every Vvardenfell region; water
 // outside it skips the per-region work entirely. Widen it if you add a region
 // beyond its edges, or the new region will never trigger.
 const vec4 MGE_VV_BOX = vec4(154000.0, 174500.0, -103000.0, -76000.0);
@@ -629,7 +573,7 @@ const vec3 MGE_WAVE_ENVELOPE_FIT = vec3(32.5, 3.0, 0.5);
 //
 // The surface normal reaches the frame through exactly one term,
 // screenCoordsOffset = normal.xy * REFL_BUMP (water.frag), which shifts where
-// the reflection and refraction are sampled. That shift IS the visible wave
+// the reflection and refraction are sampled. That shift is the visible wave
 // size. REFL_BUMP is 0.07 here (stock OpenMW ships 0.10; we lowered it to tame
 // the pale contact halo at island shores), and sin(tilt) cannot exceed 1, so
 // 0.07 is a hard ceiling no wave setting can pass.
@@ -649,12 +593,6 @@ const vec3 MGE_WAVE_ENVELOPE_FIT = vec3(32.5, 3.0, 0.5);
 // swell all drag the reflected sky sideways together - that is a smear, not a
 // shape, and it is what made the highlights read as plastic.
 //
-// Wave size should come from the fresnel response instead: dot(-viewDir, normal)
-// darkens slopes facing the viewer and brightens grazing ones, which is how real
-// water shows its shape. That term always existed; it just never saw the wave
-// tilt, because the old additive composition diluted a 2 deg detail normal and a
-// wave normal into 0.64 deg. With the tangent frame the surface genuinely tilts,
-// so Fresnel does the work MGE XE always intended it to do.
 //
 // Still scaled by wave strength at the use site, so anything above 1.0 affects
 // storms far more than calm weather.
@@ -685,7 +623,7 @@ const int   MGE_WAVE_RAY_STEPS       = 24;
 //
 // It was not protecting march quality: steps span the slab, so a near-vertical
 // ray gets ~4.7 units per step where a horizon ray gets ~84. Close water is the
-// best resolved, not the worst. What close water genuinely risks is a crest
+// Best resolved, not the worst. What close water genuinely risks is a crest
 // rising above the eye when the camera sits low, and that is what
 // MGE_WAVE_EYE_GUARD handles directly - so this fade can be short.
 // overhead surface for any swimmer shallower than ~150 units - most of the
@@ -701,18 +639,7 @@ const float MGE_WAVE_NEAR_FADE_END   = 60.0;   // and reaches full strength here
 // in with headroom - the height of the eye above the water plane measured in
 // crest heights. 1.5 means full relief once the eye clears 1.5 crests.
 const float MGE_WAVE_EYE_GUARD = 1.5;
-// ...but the suppression is local now, not global. As first shipped, the
-// headroom factor multiplied the field at every march distance, so wading in a
-// thunderstorm flattened the entire ocean ("waves height around me reduced to
-// almost nothing" ): the crest half-height scales with the weather, so
-// the suppression band is tallest (~75 units of eye height) exactly when the
-// waves matter most. The genuine constraint is near-field only - a taller-
-// than-eye crest needs pixels above the flat quad's rasterised horizon, which
-// cannot exist, so it renders beheaded; but the beheading angle falls as
-// atan((crest - eye)/distance), sub-degree past ~2000 units. So the guard now
-// fades out between GUARD_NEAR and GUARD_FAR: water at your feet still cannot
-// climb past your eye, while the storm sea beyond stays mountainous.
-// Simulated worst case (eye 5u above plane, Thunderstorm, t just past far):
+// Simulated worst case (eye 5u above plane, Thunderstorm, t just past FAR):
 // 1.1 deg of crest clipping at the horizon line - fog-buried in every weather
 // that has waves that tall. Raise GUARD_FAR if a hard horizontal wave-top cut
 // ever shows; the cost is only how far the wading-flat zone reaches.
@@ -728,13 +655,6 @@ const float MGE_WAVE_GUARD_FAR  = 2500.0;  // full relief beyond this
 // within ~75-105 u of the plane (storm halfExtent 50-70 x 1.5) gets
 // the sea flattened over the whole 150-2500 u zone, from either side.
 // The guard's real job is only "the surface must not cross the eye":
-// the switch replaces the amplitude flattening on both sides with an
-// eye clamp - full-strength waves everywhere, but within ~30-120 u
-// the surface cannot cross eye level (a floor from below, a ceiling
-// from above; near crests read as ducking just under the eye instead
-// of the whole sea lying down). Note this also changes the wading
-// look: the deliberate wading-flat zone (the 150-2500 guard) becomes
-// full waves with the near ceiling - to be judged by eye.
 // 0 = the flattening behaviour, byte-exact.
 #define MGE_WAVE_UW_RELIEF 1
 #if MGE_WAVE_UW_RELIEF
@@ -744,7 +664,7 @@ const float MGE_WAVE_UW_FLOOR_FAR  = 120.0; // and released beyond this
 #endif
 
 // Value noise returning (value, d/dx, d/dy) in one go, so a height sample also
-// yields its slope. Value channel is 0..1, not -1..1 - which is why the height
+// yields its slope. Value channel is 0..1, NOT -1..1 - which is why the height
 // function has to subtract a strength-dependent mean rather than a constant.
 vec3 mgeWaveNoise(vec2 p)
 {
@@ -816,7 +736,7 @@ vec2 mgeRoseDir(int i)
 
 // Walk the baked table (vicinity-gated, cluster-culled), find the nearest
 // coast segment, and set the rose weights toward its shoreward direction.
-// Pure ALU - no derivatives, no texture fetches - so the branches are legal.
+// Pure alu - no derivatives, no texture fetches - so the branches are legal.
 void mgeShoreSetRose(vec2 pos)
 {
     vec2 dp = pos - playerPos.xy;
@@ -831,7 +751,7 @@ void mgeShoreSetRose(vec2 pos)
     float s2 = MGE_SHORE_KERNEL * MGE_SHORE_KERNEL;
     vec2 dir = vec2(0.0);
     float d2min = 1e30;
-    // The scan lives in the generated file: NVIDIA caps how much data one
+    // The scan lives in the generated file: nvidia caps how much data one
     // array constructor may carry (C1068 at 4397 vec4s), so the table is
     // emitted as <=1024-entry chunks and the chunk loops are generated with it.
     mgeShoreScan(pos, s2, dir, d2min);
@@ -898,7 +818,7 @@ void mgeWaveFanDirs(vec2 dir1, out vec2 dir2, out vec2 dir3)
 }
 
 // displaced-geometry round). fade2 scales octave 2, lodA octaves 3+4, lodB
-// octave 5 - value and domain warp together, exactly as the shipped distance
+// octave 5 - value AND domain warp together, exactly as the shipped distance
 // LOD always did. The fragment callers below pass fade2 = 1.0 and the
 // shipped smoothsteps for lodA/lodB, which reproduces the pre-refactor
 // arithmetic term for term (multiplying by a precomputed 1.0 is exact);
@@ -912,7 +832,7 @@ float mgeWaveHeightCore(vec2 pos, float time, vec4 strength, vec2 heading,
     // the sign here is the whole heading control.
     time *= MGE_WAVE_TRAVEL;
 
-    // Precomputed literals, not the normalize()/cos()/sin() expressions Rafael
+    // Precomputed literals, NOT the normalize()/cos()/sin() expressions Rafael
     // writes. This tree compiles at #version 120 (water.frag:1), where a const
     // initialiser must be a constant expression - a function call is not one,
     // and nothing else in our shader tree relies on a driver being lenient
@@ -984,7 +904,7 @@ r = fbm.z * mgeWaveNoise(rot1 * (pos * 0.77 * fbm.x + dir1 * time * fbm.y));
 
     // Scale to game units and centre on the water plane.
     //
-    // Rafael's constant "- 27.0" does not centre the field: the noise value
+    // Rafael's constant "- 27.0" does NOT centre the field: the noise value
     // channel is 0..1 rather than -1..1, so the octave sum has a positive mean
     // that grows with strength. Measured, his field sits +16.9 units above the
     // plane at open sea and -7.2 below it at Sulphur strength. While only the
@@ -1011,8 +931,8 @@ float mgeWaveHeight(vec2 pos, float time, float distFromCamera,
                     vec4 strength, vec2 heading, vec2 octW, float targetH, vec4 bounds)
 {
     return mgeWaveHeightCore(pos, time, strength, heading, octW, 1.0,
-                             smoothstep(10000.0, 2000.0, distFromCamera),
-                             smoothstep(2000.0, 700.0, distFromCamera),
+                             smoothstep(10000.0 * MGE_WAVE_FAR_SCALE, 2000.0 * MGE_WAVE_FAR_SCALE, distFromCamera),
+                             smoothstep(2000.0 * MGE_WAVE_FAR_SCALE, 700.0 * MGE_WAVE_FAR_SCALE, distFromCamera),
                              targetH, bounds);
 }
 
@@ -1023,15 +943,8 @@ float mgeWaveHeight(vec2 pos, float time, float distFromCamera, vec4 strength,
 }
 
 #if MGE_WATER_DISPLACE
-// ---- vertex-stage displacement (Full tier, water layer) --------------------
-// The XE window (XE Mod Water.fx:141): a fade-in ramp from zero AT the camera
-// to full at 200 u - the surface is pinned to the plane at the eye itself,
-// which is what keeps the per-camera above/below branch honest at the camera
-// point - and a fade-out ending at the outer edge. The outer edge is ours,
-// not XE's 6400: 5000 u is bounded by the 384x120 mesh's measured carrying
-// XE's 6400 pairs with XE's much coarser 3900 u far wave scale).
 const float MGE_DISP_WIN_INNER = 200.0;
-const float MGE_DISP_WIN_OUTER = 5000.0;
+const float MGE_DISP_WIN_OUTER = 10000.0;
 
 float mgeDispWindow(float dist)
 {
@@ -1040,16 +953,16 @@ float mgeDispWindow(float dist)
 }
 
 // The displacement height: the same core chain the fragment shades with,
-// under mesh-matched octave fades - which octaves 384x120 ring spacing can
-// ~100 u, 4 to ~350, 2 to ~1900, the dominant swell alone beyond). The
+// under mesh-matched octave fades - which octaves the 768x240 ring spacing
+// octaves inside ~100 u, 4 to ~350, 2 to ~1900, the swell alone beyond;
 // fragment keeps every octave in its normals regardless - the geometry
 // carries the swell, the normal map carries the detail, exactly XE's own
 // split between its two texture scales.
 float mgeDispHeight(vec2 pos, float time, float distFromCamera, vec4 strength, vec2 heading)
 {
-    float fade2 = 1.0 - smoothstep(1100.0, 1900.0, distFromCamera);
-    float lodA  = 1.0 - smoothstep(150.0, 350.0, distFromCamera);
-    float lodB  = 1.0 - smoothstep(60.0, 160.0, distFromCamera);
+    float fade2 = 1.0 - smoothstep(2200.0, 3800.0, distFromCamera);
+    float lodA  = 1.0 - smoothstep(300.0, 700.0, distFromCamera);
+    float lodB  = 1.0 - smoothstep(120.0, 320.0, distFromCamera);
     return mgeWaveHeightCore(pos, time, strength, heading, vec2(1.0),
                              fade2, lodA, lodB, 999.9, vec4(0.0));
 }
@@ -1060,10 +973,6 @@ uniform sampler3D mgeWave3d;      // fork-bound unit 5; never bound on stock
 uniform float mgeWaterXeField;    // 1 only when the volume loaded (fork)
 
 // XE ini semantics: displacement = base * weather multiplier * (a - 0.5).
-// The wind curve follows the source mechanic's per-weather table for
-// cloudy/overcast/rain/thunder (within 1%) and deliberately departs
-// elsewhere - blizzard runs with the other storms by design rather
-// weather, so no curve of wind alone could carry that table exactly.
 const float MGE_WAVE_XE_BASE = 50.0;   // the MGE.ini Water Wave Height
 // XE Mod Water.fx:141 verbatim window (the 6400 is honest for this field:
 // sim_xe_field_race X2 - our mesh carries it better than XE's own did).
@@ -1074,14 +983,13 @@ const float MGE_XE_WIN_OUTER = 6400.0;
 const float MGE_FOAM_CREST_H0_XE = 4.0;
 const float MGE_FOAM_CREST_H1_XE = 6.0;
 // itself travels - measured, +1 texel diagonally per frame = ~55 u/s on a
-// fixed NE diagonal, mostly in-place morph - which reads as bobbing against
+// fixed ne diagonal, mostly in-place morph - which reads as bobbing against
 // the strongly-directional 138 u/s sea this project shipped for a month.
 // A declared taste deviation from XE: the sample position additionally
 // scrolls along the authored sea heading. Height and normal samples shift
-// together (coherence). 0.0 = XE-verbatim static sampling, byte-exact.
+// Together (coherence). 0.0 = XE-verbatim static sampling, byte-exact.
 const float MGE_XE_TRAVEL_SPEED = 100.0;   // world u/s along MGE_WAVE_HEADING
 
-// GLSL 1.20: the vertex stage may only use the Lod texture variants.
 #if MGE_WATER_VERTEX_STAGE
 #define MGE_TEX3D(u) texture3DLod(mgeWave3d, u, 0.0)
 #else
@@ -1169,7 +1077,7 @@ float mgeWaveHeightRose(vec2 pos, float time, float distFromCamera,
     h = r.x * strength.x + h;
     pos = -r.yz * fbm.w + pos;
 
-    float lod = smoothstep(10000.0, 2000.0, distFromCamera);
+    float lod = smoothstep(10000.0 * MGE_WAVE_FAR_SCALE, 2000.0 * MGE_WAVE_FAR_SCALE, distFromCamera);
     if (lod > 0.0)
     {
         pos.xy = pos.yx;
@@ -1192,7 +1100,7 @@ float mgeWaveHeightRose(vec2 pos, float time, float distFromCamera,
         h = r.x * strength.y + h;
         pos = -r.yz * fbm.w + pos;
 
-        float lod2 = smoothstep(2000.0, 700.0, distFromCamera);
+        float lod2 = smoothstep(2000.0 * MGE_WAVE_FAR_SCALE, 700.0 * MGE_WAVE_FAR_SCALE, distFromCamera);
         if (lod2 > 0.0)
         {
             fbm *= vec4(1.618, 1.346321, 0.45, 1.3);
@@ -1217,7 +1125,7 @@ vec4 mgeWaveStrengthFanout(float s)
 {
     vec4 f = vec4(s, sqrt(s), 0.0, 0.0);
     f.z = sqrt(f.y);
-    // Sharpening gate: ON for calm/sheltered water, off at open-sea strength.
+    // Sharpening gate: on for calm/sheltered water, off at open-sea strength.
     // Note the reversed smoothstep edges - this is 0 at s = 1.0.
     f.w = smoothstep(0.80, 0.65, f.x);
     return f;
@@ -1267,7 +1175,7 @@ vec3 mgeRaymarchWater(vec3 eyePos, vec3 dir, float t0, float t1, float time,
                       vec4 strength, vec2 heading, vec2 octW, float planeZ, bool underwater)
 {
     // Slab enclosing the centred field. Symmetric, unlike Rafael's -15/+50,
-    // because the centred field IS symmetric about the plane.
+    // because the centred field is symmetric about the plane.
     // Scaled with the amplitude, or the slab would clip the taller field.
     // Envelope and early-out bounds widen with the largest octave weight, or a
     // boosted train could rise past the slab / trip the early-out wrongly.
@@ -1327,7 +1235,7 @@ vec3 mgeRaymarchWater(vec3 eyePos, vec3 dir, float t0, float t1, float time,
         float guard = mix(mgeHeadroom, 1.0,
                           smoothstep(MGE_WAVE_GUARD_NEAR, MGE_WAVE_GUARD_FAR, t));
 #if MGE_WAVE_UW_RELIEF
-        // The amplitude flattening is replaced ON both sides by the
+        // The amplitude flattening is replaced on both sides by the
         // swimmer's camera bobs at/just above the plane, so the
         // below-only fix never engaged - the abs() headroom flattened
         // from the above side).
@@ -1419,15 +1327,15 @@ vec3 mgeRaymarchWater(vec3 eyePos, vec3 dir, float t0, float t1, float time,
 #endif // MGE_WATER_WAVE_SHAPES
 
 // ---- foam ------------------------------------------------------------------
-// calibrated TO our normal map, and that is why these differ from Rafael's.
+// Calibrated to our normal map, and that is why these differ from Rafael's.
 // His mod ships its own textures/omw/water_nm.png (1024x1024, xy rms 0.384) and
-// his README tells you to overwrite the stock one with it. Ours is the stock
+// his readme tells you to overwrite the stock one with it. Ours is the stock
 // 128x128 map at xy rms 0.150 - 2.5x flatter. Measured with his constants on our
-// texture, 2.4% of the surface reached MGE_FOAM_MIN and 0.0% reached MAX: foam
+// texture, 2.4% of the surface reached MGE_FOAM_MIN and 0.0% reached max: foam
 // was unreachable, not faint. These values put the same fraction of our surface
 // over the threshold. Swapping in his texture instead would work too, but it
 // changes the whole water surface and breaks the MGE XE parity at Clear.
-// shoaling (wave build only). Waves slow in shallow water and steepen until
+// Shoaling (wave build only). Waves slow in shallow water and steepen until
 // they break. Our substitute for coast-following, which the stock tier's driver
 // cannot carry: we cannot aim waves at the shore, but making them grow as they
 // arrive gives much of the same impression - and unlike a direction, an
@@ -1442,7 +1350,7 @@ const float MGE_WAVE_DISTORT_MAX = 0.026;
 // individual faces into mirrors. Scaled in by wave strength.
 const float MGE_WAVE_FRESNEL_MAX = 0.45;
 
-const float MGE_WAVE_SHOAL       = 0.0;   // dropped by reported: not worth the
+const float MGE_WAVE_SHOAL       = 0.0;
                                           // refraction artifacts it brought. At 0 the code is
                                           // inert (normal unchanged, offset undivided). Removing
                                           // it outright - and the early depth sample it needs -
@@ -1454,39 +1362,20 @@ const float MGE_FOAM_INTENSITY = 1.0;    // global scale
 // noted. The foam pattern lives in the normal map's alpha channel - we ship his
 // authored foam alpha over our stock RGB, so the water surface is unchanged.
 const float MGE_FOAM_SCALE     = 0.0005;  // world units -> foam UV (his)
-// MGE XE animates foam by walking a 256x256x32 volume texture's time axis, with
-// no UV drift at all - which is why its foam never reads as travelling. We have
-// a 2D texture here, so MGE_FOAM_MORPH cross-dissolves between decorrelated
-// offsets to the same effect (0 = no morphing, pure drift = the old behaviour).
 // Costs one extra texture sample per foam layer; set to 0 on a weak card.
 const float MGE_FOAM_ATLAS_INSET = 0.004;  // tile inset, stops frames bleeding
 const float MGE_FOAM_MORPH     = 1.20;    // pseudo-slices per second, calm water
-// one dial for how fast foam appears and dissolves IN place. Scales every
-// visibility-shift rate together: the morph (pattern replacement) and both
-// gray density pulses. 1.0 is Liam's original tuning, which reads as
-// shimmering - at his rates the three multiplied layers replace their pattern
-// 0.3-1.6x per second each, out of phase, so the product twinkles constantly.
 // 0.4 turns replacement into breathing (layer 1: one dissolve per ~1.9 s calm,
 // ~1.2 s storm; density pulses at 6.3 s and 9.2 s periods) without touching
-// where foam sits or how it surges - those are the masks and MGE_FOAM_SURGE.
+// Where foam sits or how it surges - those are the masks and MGE_FOAM_SURGE.
 const float MGE_FOAM_CHURN     = 0.40;    // 1.0 = Liam's rates (shimmered)
 // Storms churn. The morph rate scales with the weather's wave strength - but
-// keep this small. The morph is a cross-dissolve between decorrelated offsets of
+// KEEP this small. The morph is a cross-dissolve between decorrelated offsets of
 // the same texture: it replaces the pattern in place, it does not translate it.
 // At 1.60 a thunderstorm ran 5.0 whole-pattern replacements per second and read
 // as flashing, which is exactly what it is. Foam moves via MGE_FOAM_SURGE.
 const float MGE_FOAM_STORM_RATE = 0.40;   // extra rate per unit of wave strength
 const float MGE_FOAM_DRIFT     = 0.10;    // residual directional drift (1.0 = Liam's, 0 = MGE XE)
-// slosh - foam surges and withdraws with each passing swell, in world units of
-// pattern displacement per unit of surface slope. This replaced a uniform
-// advection along the heading (138 u/s, weather-scaled), which correctly
-// rejected: it turned surf into a current, foam streaming away from every
-// shore. MGE XE has NO net foam travel at all - its foam UVs are bare world
-// position (tex3D(sampWater3d, float3(IN.pos.xy / 45, time)), XE Water.fx:494)
-// and every to-and-fro it shows comes from the surface normal oscillating the
-// shoreline term (depth += 50 * (0.99 - normal.z), line 471). Same physics as
-// real foam: orbital motion under a swell is a closed loop, so foam rocks back
-// and forth and goes nowhere.
 //
 // A 1-D travelling compression wave along the heading: displacement =
 // heading * sin(k*dot(pos, heading) + w*t*MGE_WAVE_TRAVEL) * amplitude. Foam
@@ -1496,8 +1385,6 @@ const float MGE_FOAM_DRIFT     = 0.10;    // residual directional drift (1.0 = L
 // axis, so its curl vanishes identically - it can stretch and bunch the
 // pattern along the travel direction, never rotate or knead it.
 //
-// constructed coarse rather than borrowed, after two failed attempts to
-// borrow. Displacing by normal0 swirled ("a puddle with oil in it" );
 // displacing by mgeWaveN still swirled ("diesel spilled into water"), because
 // a noise field's normal is its gradient and gradients weight high
 // frequencies: measured on the octave ladder, 67% of mgeWaveN's slope content
@@ -1511,7 +1398,7 @@ const float MGE_FOAM_DRIFT     = 0.10;    // residual directional drift (1.0 = L
 // the swash - exactly MGE XE, whose foam UVs are bare world position.
 const float MGE_FOAM_SURGE     = 50.0;    // world units of surge at full wave strength
 // Distance between surge bands. Strain (pattern stretch) at full strength is
-// surge * 2pi/wavelength = 0.29 - visible bunching, no rubber. The band
+// Surge * 2pi/WAVELENGTH = 0.29 - visible bunching, no rubber. The band
 // travels at the field's own 138.3 wu/s (MGE_WAVE_FIELD_SPEED), so a fixed
 // point surges forward and back over ~8 s.
 const float MGE_FOAM_SURGE_WAVELENGTH = 1100.0;
@@ -1525,7 +1412,7 @@ const float MGE_FOAM_MIN       = 0.08;    // surface slope where crest foam star
 const float MGE_FOAM_MAX       = 0.35;    // slope for full crest foam (his)
 const float MGE_FOAM_SHORE     = 1.0;     // shoreline foam amount (0 = none)
 const float MGE_FOAM_SHORE_DEPTH = 45.0;  // depth where shore foam is gone (his)
-// occluder rejection - kills the foam halo around submerged poles. Shore foam
+// Occluder rejection - kills the foam halo around submerged poles. Shore foam
 // keys on the refraction depth buffer, and a submerged object writes its
 // surface into that buffer, so the water in front of it reports "shallow" and
 // grows a foam outline (every submerged pole, pier leg, statue). The
@@ -1538,7 +1425,7 @@ const float MGE_FOAM_SHORE_DEPTH = 45.0;  // depth where shore foam is gone (his
 // above the water plane (mwrender/water.cpp ClipCullNode), so land reads
 // far-plane deep in this buffer, and the first, remapping version transplanted
 // every waterline/LOD discontinuity into a hard foam seam 55 wu sideways.
-// With the window starting AT the band's reach, min(L,R) <= centre <= reach on
+// With the window starting at the band's reach, min(L,R) <= centre <= reach on
 // every monotone shore, so the suppression is identically 0 wherever real
 // shore foam exists and only fires for shallow readings flanked by
 // beyond-band water on both sides - poles, pier legs, narrow ridges.
@@ -1547,26 +1434,15 @@ const float MGE_FOAM_SHORE_DEPTH = 45.0;  // depth where shore foam is gone (his
 const float MGE_FOAM_OCCLUDER_R = 55.0;   // tap radius, world units
 // The shore band's true reach in scaled depth: SHORE_DEPTH plus the swash's
 // maximum extension, 45 + 380 * (p99 slope 0.273 - SLOPE_MID 0.15) = 92.
-// derived - re-derive if SHORE_DEPTH, swash or SLOPE_MID change; a value
+// Derived - re-derive if SHORE_DEPTH, swash or SLOPE_MID change; a value
 // below the real reach re-introduces the entry-71 fold at the band tail.
 const float MGE_FOAM_BAND_REACH = 92.0;
 const float MGE_FOAM_OCCLUDER_FADE = 30.0; // suppression fade width past the reach
-// swash window - a backstop, deliberately clear of the living band. The gate
-// fades the swash between SHORE_DEPTH * window/2 and SHORE_DEPTH * window, so
-// deep water can never be swash-dragged into the foam band, but the band
-// itself (which the +-48-unit swash extends to ~92 scaled units) is
-// untouched. Halo suppression is MGE_FOAM_OCCLUDER_R's job now.
 //
-// (SHORE_DEPTH * window/2) must exceed 1.5x the swash amplitude (~48), i.e.
-// window >= 3.2 at current constants. The first shipment used a [1.0, 2.5]
-// window whose 67-unit fade sat inside the band: on the foam-extending phase
-// it compressed the outer band 2.1x (a visibly squeezed second layer's
-// "hard edge between two layers"), and on the retreating phase d+swash*gate
-// became non-monotone in depth - a fold, rendering a stripe of uniform foam.
 // It also cut the band's reach 92 -> 73 ("foam less pronounced at the shore").
 // Simulate d(eff)/dd across both swash extremes before changing either number.
 const float MGE_FOAM_SWASH_WINDOW = 4.0;  // fade spans [window/2, window] x SHORE_DEPTH
-// swash - the waterline running up the beach and withdrawing. From MGE XE's
+// Swash - the waterline running up the beach and withdrawing. From MGE XE's
 // "Small scale shoreline animation": the foam band's depth is perturbed by the
 // surface, so the band's edge advances and retreats. Moving the foam texture
 // instead only slides the pattern along a fixed edge.
@@ -1579,68 +1455,31 @@ const float MGE_FOAM_WAVE_GAIN   = 1.50;
 // Guarded under MGE_WATER_FOAM so the foam-off build stays byte-identical
 // (the deploy gate's no-op invariant).
 //
-// crest foam V2 (MGE_FOAM_CREST_FIELD): the shipped crest mask's wave-field
-// arm never reaches its 0.08-0.35 window (the field's slopes are too mild -
-// measured coverage 0.00-0.1% at every strength), so in-game "crest" foam was
-// painted by the texture-normal arm: round blobs at the big-tap scale,
-// travelling at the tap's drift (~57 u/s), spatially uncorrelated with the
-// actual crests - the reported "round spots of foam travelling across the water
-// rather than bands". The V2 mask is field-driven: an absolute breaking
-// height (a fixed threshold gives the strength ladder for free, because the
-// field's spread grows with sea state; an sd-relative gate is a fixed
-// quantile at every strength and has NO ladder - measured), a leading-face
-// bias (whitecaps ride the front face), and slope as a bonus, not a gate.
-// Raced in simulations/sim_foam_crest_shape.py: coverage ladder
-// 0 / 0.16 / 1.5 / 4.0 % at s 0.30 / 0.60 / 0.822 / 1.00, blob elongation
-// 2.2-2.3 along the crest lines (texture arm: round, 1.0), and the ribbons
-// travel with the crests instead of with the texture.
 #if MGE_FOAM_CREST_FIELD
 const float MGE_FOAM_CREST_H0 = 20.0;   // crest height where whitecaps start
                                         // (game units of marched relief)
 const float MGE_FOAM_CREST_H1 = 30.0;   // full-foam crest height
 const float MGE_FOAM_CREST_TEX = 0.25;  // residual texture-mask weight (breakup)
-// The relief itself is faded flat near the camera (mgeWaveNearFade, 80-500 u),
-// so nearer than ~500 u there is no visible crest to whiten: the V2 distance
-// fade tracks the relief's own fade instead of the old 15-50 u onset.
 const float MGE_FOAM_CREST_NEAR0 = 400.0;
 const float MGE_FOAM_CREST_NEAR1 = 900.0;
 #endif
 //
-// shore swash V2 (MGE_FOAM_SWASH_V2): the shipped swash displaces the band's
+// Shore swash V2 (MGE_FOAM_SWASH_V2): the shipped swash displaces the band's
 // effective depth by 380*(0.15 - |n0.xy|) = -47..+40 u, driven by the same
 // scrolling big-tap texture, on a band 45 u deep with a 5-u inner ramp.
-// Measured on the real texture (simulations/sim_foam_shore_band.py): 5
-// enclosed no-foam holes per 2048-u beach (roundness 0.60), a 2-u hard-edge
-// tail with 22.7% of all band crossings <= 8 u, 85% of beach columns folded
-// into split bands - all travelling at the tap drift ~57 u/s. That is the
-// reported "circles and bands of no-foam moving through the foam near shores, with
-// hard edges". V2 re-bases the swash on a constructed 1-D surge along the
-// heading (coarse, smooth, curl-free - the same construction and K/W as the
-// foam surge: one band per 1100 u at the field's 138 u/s) plus the texture
-// term at a quarter amplitude (organic breakup that can no longer punch
-// through the band or fold the mapping) and widens the inner ramp. Raced:
 // holes 5 -> 0, hard-edge fraction 22.7% -> 0.0%, folds 85% -> 33% (soft).
 #if MGE_FOAM_SWASH_V2
 const float MGE_FOAM_SWASH_SURGE = 24.0;  // 1-D surge amplitude, world units
 const float MGE_FOAM_SWASH_TEX   = 95.0;  // texture-term amplitude (was 380)
 const float MGE_FOAM_SHORE_INNER = 12.0;  // band inner ramp depth (was 5.0)
-// the pond trim (report: "too much foam mass away from the shore"
-// at shallow calm water). The band is bounded by depth, and on gentle
-// bathymetry the depth contour lies hundreds of units offshore, a
-// whole shallow pond sits inside the window (geometry: at a 3 % slope,
-// depth 4.5 u is already 150 u from the waterline, so no depth-based
-// profile can hug the line there). The physical lever is weather:
 // surf foam needs waves, and a glassy pond should barely foam. The
-// band's amplitude and the swash's motion scale with the same weather
+// band's amplitude AND the swash's motion scale with the same weather
 // ramp the waves read; the outer falloff is squared and the reach
 // trimmed 45 -> 36 to concentrate what remains toward the line.
-// Raced (sim_foam_shore_band.py pond section): calm-pond mass -74 %
-// (slope-3 %) / -80 % (flat bowl), rain/storm surf kept, the V2
-// artifact metrics (holes 0, hard edges ~0) unchanged.
 // any foam at all next to shores" in calm weather). The calm floor
 // rises to 0.45 and the reach rides the weather instead (calm 22 ->
 // storm 36): calm shores keep a visible waterline band while a calm
-// pond keeps only rim foam. The motion has its own gentler ramp,
+// pond keeps only rim foam. The motion has its own gentler ramp , 
 // coupling it to the amplitude ramp pushed the waterline strip dry
 // moved the calm strip +0.3 %; with the split ramp the calm strip
 // restored to 56 % of pre-trim while the calm-pond mass stayed -58 %).
@@ -1655,7 +1494,7 @@ const float MGE_FOAM_SHORE_REACH_CALM = 22.0; // calm outer reach
 
 
 // How strongly a region's own character replaces the default sea look. The
-// sea entry is never applied - open water keeps the MGE body colour this stack
+// Sea entry is never applied - open water keeps the MGE body colour this stack
 // computes, so parity with the patched engine is untouched everywhere except
 // the named regions below. 0 disables regional character entirely.
 const float MGE_TYPE_TINT = 0.6;
