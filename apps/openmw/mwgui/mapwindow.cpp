@@ -95,8 +95,14 @@ namespace MWGui
             return Constants::CellGridRadius;
         if (!Settings::terrain().mDistantTerrain)
             return Constants::CellGridRadius;
-        const int viewingDistanceInCells
-            = static_cast<int>(Settings::camera().mViewingDistance / Constants::CellSizeInUnits);
+        // how far the map reaches follows how far the player sees. With the
+        // store-once distant layer that is the distant land distance: the
+        // viewing distance then ends stock objects only (RenderingManager).
+        float seen = Settings::camera().mViewingDistance;
+        if (Settings::terrain().mDistantStaticsStoreOnce
+            && !Settings::terrain().mObjectPagingDiskCacheDir.get().empty())
+            seen = std::max(seen, Settings::terrain().mDistantLandDistance.get());
+        const int viewingDistanceInCells = static_cast<int>(seen / Constants::CellSizeInUnits);
         return std::clamp(
             viewingDistanceInCells, Constants::CellGridRadius, Settings::map().mMaxLocalViewingDistance.get());
     }

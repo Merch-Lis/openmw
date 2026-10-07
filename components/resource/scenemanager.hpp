@@ -101,6 +101,10 @@ namespace Resource
         void recreateShaders(osg::ref_ptr<osg::Node> node, const std::string& shaderPrefix = "objects",
             const osg::Program* programTemplate = nullptr);
 
+        /// Shaders for state the caller owns (statesets are modified in place), without the lookup of normal and
+        /// specular maps by file name: the store-once distant statics layer is diffuse-only by design.
+        void createShadersDiffuseOnly(osg::ref_ptr<osg::Node> node);
+
         /// Applying shaders to a node may replace some fixed-function state.
         /// This restores it.
         /// When editing such state, it should be reinstated before the edits, and shaders should be recreated

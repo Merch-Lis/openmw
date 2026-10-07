@@ -65,6 +65,11 @@ namespace Settings
         SettingValue<int> mDistantStaticsNearRingCells{ mIndex, "Terrain", "distant statics near ring cells" };
         SettingValue<int> mDistantStaticsFarRingCells{ mIndex, "Terrain", "distant statics far ring cells" };
         SettingValue<int> mDistantStaticsVeryFarRingCells{ mIndex, "Terrain", "distant statics very far ring cells" };
+        SettingValue<bool> mDistantStaticsStoreOnce{ mIndex, "Terrain", "distant statics store once" };
+        SettingValue<float> mDistantLandDistance{ mIndex, "Terrain", "distant land distance",
+            makeMaxSanitizerFloat(0) };
+        SettingValue<int> mDistantStaticsTextureSkip{ mIndex, "Terrain", "distant statics texture skip",
+            makeClampSanitizerInt(0, 3) };
     };
 }
 

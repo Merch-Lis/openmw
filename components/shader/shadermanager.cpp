@@ -598,6 +598,13 @@ namespace Shader
             program->addShader(fragmentShader);
             addLinkedShaders(vertexShader, program);
             addLinkedShaders(fragmentShader, program);
+            // The store-once distant statics layer draws the object shaders
+            // instanced (objects.vert under MGE_DL_INSTANCED) and feeds the two
+            // per-instance attributes through fixed slots. A program is shared
+            // by every user of its shader pair, so the slots are bound on all
+            // of them; a program without the attributes ignores the binding.
+            program->addBindAttribLocation("aMgeInstPos", 6);
+            program->addBindAttribLocation("aMgeInstRot", 7);
 
             found = mPrograms.insert(std::make_pair(std::make_pair(vertexShader, fragmentShader), program)).first;
         }

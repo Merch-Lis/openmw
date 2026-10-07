@@ -246,9 +246,17 @@ namespace MWRender
         void processChangedSettings(const Settings::CategorySettingVector& settings);
 
         float getNearClipDistance() const { return mNearClip; }
+        /// where the picture ends right now (the far plane)
         float getViewDistance() const { return mViewDistance; }
+        /// where the picture ends by the settings: the viewing distance, or
+        /// with the store-once distant layer the distant land distance when
+        /// that is the larger. What a script takes as "how far the player sees".
+        float getBaseViewDistance() const;
 
+        /// a script's override of where the picture ends
         void setViewDistance(float distance, bool delay = false);
+        /// the '[Camera] viewing distance' setting changed
+        void setViewingDistanceSetting(float setting);
 
         float getTerrainHeightAt(const osg::Vec3f& pos, ESM::RefId worldspace);
 
@@ -332,6 +340,7 @@ namespace MWRender
 
         osg::ref_ptr<osg::Uniform> mClampActorsGateUniform;
         osg::ref_ptr<osg::Group> mDistantStaticsRoot;
+        unsigned int mDistantStaticsMask = 0; // the root's mask while exteriors are shown
         std::filesystem::path mDistantStaticsDir;
         osg::ref_ptr<osgViewer::Viewer> mViewer;
         osg::ref_ptr<osg::Uniform> mMgeNiceWeatherUniform;
@@ -388,7 +397,17 @@ namespace MWRender
         float mNightEyeFactor;
 
         float mNearClip;
+        /// Where the picture ends: the far plane, the land's reach, fog.
+        /// Without the store-once distant layer this is the viewing distance.
+        /// With it the viewing distance (mStockObjectDistance) is where stock
+        /// objects end and the layer takes over, and the picture runs on to
+        /// '[Terrain] distant land distance' when that is the larger.
         float mViewDistance;
+        float mStockObjectDistance = 0.f;
+        /// the paging manager that owns the store-once layer; null without one
+        ObjectPaging* mOncePaging = nullptr;
+        float farLimitFor(float viewingDistance) const;
+        void applyDistantLandDistances();
         bool mFieldOfViewOverridden;
         float mFieldOfViewOverride;
         float mFieldOfView;

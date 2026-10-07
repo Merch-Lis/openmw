@@ -84,6 +84,23 @@ namespace Resource
 
     osg::ref_ptr<osg::Image> ImageManager::getImage(VFS::Path::NormalizedView path, bool disableFlip)
     {
+        return loadImage(path, disableFlip, true);
+    }
+
+    osg::ref_ptr<osg::Image> ImageManager::getImageUncached(VFS::Path::NormalizedView path, bool disableFlip)
+    {
+        return loadImage(path, disableFlip, false);
+    }
+
+    osg::ref_ptr<osg::Image> ImageManager::loadImage(VFS::Path::NormalizedView path, bool disableFlip, bool cache)
+    {
+        // cache == false: nothing this call loads enters the cache - neither
+        // the image nor, on failure, the warning image (the next caller that
+        // does cache reports the failure again and records it)
+        const auto remember = [&](osg::Image* image) {
+            if (cache)
+                mCache->addEntryToObjectCache(path.value(), image);
+        };
         osg::ref_ptr<osg::Object> obj = mCache->getRefFromObjectCache(path);
         if (obj)
             return osg::ref_ptr<osg::Image>(static_cast<osg::Image*>(obj.get()));
@@ -97,7 +114,7 @@ namespace Resource
             catch (std::exception& e)
             {
                 Log(Debug::Error) << "Failed to open image: " << e.what();
-                mCache->addEntryToObjectCache(path.value(), mWarningImage);
+                remember(mWarningImage);
                 return mWarningImage;
             }
 
@@ -106,7 +123,7 @@ namespace Resource
             if (!reader)
             {
                 Log(Debug::Error) << "Error loading " << path << ": no readerwriter for '" << ext << "' found";
-                mCache->addEntryToObjectCache(path.value(), mWarningImage);
+                remember(mWarningImage);
                 return mWarningImage;
             }
 
@@ -119,7 +136,7 @@ namespace Resource
                 if (stream->gcount() != 18)
                 {
                     Log(Debug::Error) << "Error loading " << path << ": couldn't read TGA header";
-                    mCache->addEntryToObjectCache(path.value(), mWarningImage);
+                    remember(mWarningImage);
                     return mWarningImage;
                 }
                 int type = header[2];
@@ -138,7 +155,7 @@ namespace Resource
             {
                 Log(Debug::Error) << "Error loading " << path << ": " << result.message() << " code "
                                   << result.status();
-                mCache->addEntryToObjectCache(path.value(), mWarningImage);
+                remember(mWarningImage);
                 return mWarningImage;
             }
 
@@ -151,7 +168,7 @@ namespace Resource
                 if (!uncompress)
                 {
                     Log(Debug::Error) << "Error loading " << path << ": no S3TC texture compression support installed";
-                    mCache->addEntryToObjectCache(path.value(), mWarningImage);
+                    remember(mWarningImage);
                     return mWarningImage;
                 }
                 else
@@ -197,7 +214,7 @@ namespace Resource
                     // We don't want it to be corrupted or displayed incorrectly, so bail
                     // OSGoS *can* flip RGTC, but we can't verify that (yet?)
                     Log(Debug::Error) << "Error loading " << path << ": cannot flip non-S3TC compressed texture";
-                    mCache->addEntryToObjectCache(path.value(), mWarningImage);
+                    remember(mWarningImage);
                     return mWarningImage;
                 }
 
@@ -205,7 +222,7 @@ namespace Resource
                 image->setOrigin(osg::Image::TOP_LEFT);
             }
 
-            mCache->addEntryToObjectCache(path.value(), image);
+            remember(image);
             return image;
         }
     }

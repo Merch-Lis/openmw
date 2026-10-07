@@ -94,7 +94,10 @@ namespace MWLua
         api["setFieldOfView"]
             = [renderingManager](const FiniteFloat v) { renderingManager->setFieldOfView(osg::RadiansToDegrees(v)); };
 
-        api["getBaseViewDistance"] = [] { return Settings::camera().mViewingDistance.get(); };
+        // how far the player sees by the settings: with the store-once distant
+        // layer the viewing-distance setting ends stock objects only, and the
+        // picture runs on to the distant land distance (RenderingManager)
+        api["getBaseViewDistance"] = [renderingManager] { return renderingManager->getBaseViewDistance(); };
         api["getViewDistance"] = [renderingManager]() { return renderingManager->getViewDistance(); };
         api["setViewDistance"]
             = [renderingManager](const FiniteFloat d) { renderingManager->setViewDistance(d, true); };

@@ -89,9 +89,13 @@ void main()
 
     gl_FragData[0].xyz = perObjectTonemap(gl_FragData[0].xyz);
 
-    // MGE XE shadow receiver: multiplies the final colour, ambient included,
-    // before fog.
-    gl_FragData[0].xyz *= mgeShadowMult(shadowing, viewNormal);
+    // The receiver scales the shadow by how squarely a surface faces the sun.
+    // Grass meshes carry normals that point sideways or down, so by its own
+    // normal most of a tuft takes no shadow at all and stands bright on
+    // shadowed ground. Grass takes the shadow the way the ground under it
+    // does: with the world's up axis (a chunk's model matrix is a translation).
+    vec3 mgeGroundNormal = normalize(gl_NormalMatrix * vec3(0.0, 0.0, 1.0));
+    gl_FragData[0].xyz *= mgeShadowMult(shadowing, mgeGroundNormal);
 
     gl_FragData[0] = applyFogAtDist(gl_FragData[0], euclideanDepth, linearDepth, far);
 

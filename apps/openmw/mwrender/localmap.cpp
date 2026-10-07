@@ -719,9 +719,16 @@ namespace MWRender
         camera->setClearMask(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
         camera->setRenderOrder(osg::Camera::PRE_RENDER);
 
-        camera->setCullMask(Mask_Scene | Mask_SimpleWater | Mask_Terrain | Mask_Object | Mask_Static);
-        camera->setCullMaskLeft(Mask_Scene | Mask_SimpleWater | Mask_Terrain | Mask_Object | Mask_Static);
-        camera->setCullMaskRight(Mask_Scene | Mask_SimpleWater | Mask_Terrain | Mask_Object | Mask_Static);
+        // Mask_DistantStatics: the store-once distant layer. Beyond the
+        // viewing distance it is what draws the objects, stock object paging
+        // (Mask_Static) being confined to the cells inside it - without the
+        // layer a zoomed-out map would show those cells as bare land. The
+        // camera uses the scene's own programs, so the instanced path applies.
+        const unsigned int mapMask
+            = Mask_Scene | Mask_SimpleWater | Mask_Terrain | Mask_Object | Mask_Static | Mask_DistantStatics;
+        camera->setCullMask(mapMask);
+        camera->setCullMaskLeft(mapMask);
+        camera->setCullMaskRight(mapMask);
         camera->setNodeMask(Mask_RenderToTexture);
         camera->setProjectionMatrix(mProjectionMatrix);
         camera->setViewMatrix(mViewMatrix);

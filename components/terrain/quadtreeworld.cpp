@@ -5,8 +5,10 @@
 #include <osg/ShapeDrawable>
 #include <osgUtil/CullVisitor>
 
+#include <algorithm>
 #include <limits>
 
+#include <components/debug/debuglog.hpp>
 #include <components/esm/util.hpp>
 #include <components/loadinglistener/reporter.hpp>
 #include <components/misc/constants.hpp>
@@ -41,14 +43,20 @@ namespace Terrain
     {
     public:
         DefaultLodCallback(float factor, float minSize, float viewDistance, const osg::Vec4i& grid, int cellSizeInUnits,
-            float distanceModifier = 0.f)
+            int borderMargin = -1, float distanceModifier = 0.f)
             : mFactor(factor)
             , mMinSize(minSize)
             , mViewDistance(viewDistance)
             , mActiveGrid(grid)
             , mDistanceModifier(distanceModifier)
             , mCellSizeInUnits(cellSizeInUnits)
+            , mBorderMargin(borderMargin)
         {
+            // OPENMW_TERRAIN_NO_BORDER_SPLIT: lets nodes cross a confined
+            // manager's border again - only to see loadRenderingNode's guard fire
+            static const bool noBorderSplit = getenv("OPENMW_TERRAIN_NO_BORDER_SPLIT") != nullptr;
+            if (noBorderSplit || grid.z() <= grid.x() || grid.w() <= grid.y())
+                mBorderMargin = -1;
         }
 
         ReturnValue isSufficientDetail(QuadTreeNode* node, float dist) override
@@ -67,6 +75,19 @@ namespace Terrain
                 // to prevent making chunks who will cross the activegrid border
                 if (intersects)
                     return Deeper;
+                // nor the border of a confined chunk manager (the active grid
+                // grown by its margin): a node is inside it or outside it
+                if (mBorderMargin >= 0)
+                {
+                    const osg::Vec4i border(mActiveGrid.x() - mBorderMargin, mActiveGrid.y() - mBorderMargin,
+                        mActiveGrid.z() + mBorderMargin, mActiveGrid.w() + mBorderMargin);
+                    const bool touches = (std::max(nodeBounds.x(), border.x()) < std::min(nodeBounds.z(), border.z())
+                        && std::max(nodeBounds.y(), border.y()) < std::min(nodeBounds.w(), border.w()));
+                    const bool inside = nodeBounds.x() >= border.x() && nodeBounds.y() >= border.y()
+                        && nodeBounds.z() <= border.z() && nodeBounds.w() <= border.w();
+                    if (touches && !inside)
+                        return Deeper;
+                }
             }
             dist = std::max(0.f, dist + mDistanceModifier);
             if (dist > mViewDistance && !activeGrid) // for Scene<->ObjectPaging sync the activegrid must remain loaded
@@ -92,6 +113,7 @@ namespace Terrain
         osg::Vec4i mActiveGrid;
         float mDistanceModifier;
         int mCellSizeInUnits;
+        int mBorderMargin;
     };
 
     class RootNode : public QuadTreeNode
@@ -364,8 +386,8 @@ namespace Terrain
         return lodFlags;
     }
 
-    void QuadTreeWorld::loadRenderingNode(
-        ViewDataEntry& entry, ViewData* vd, float cellWorldSize, const osg::Vec4i& gridbounds, bool compile)
+    void QuadTreeWorld::loadRenderingNode(ViewDataEntry& entry, ViewData* vd, float cellWorldSize,
+        const osg::Vec4i& gridbounds, int borderMargin, bool compile)
     {
         if (!vd->hasChanged() && entry.mRenderingNode)
             return;
@@ -394,8 +416,44 @@ namespace Terrain
             bool activeGrid = (center.x() > gridbounds.x() && center.y() > gridbounds.y() && center.x() < gridbounds.z()
                 && center.y() < gridbounds.w());
 
+            const bool gridValid = gridbounds.z() > gridbounds.x() && gridbounds.w() > gridbounds.y();
+            const float halfSize = entry.mNode->getSize() / 2;
+
             for (QuadTreeWorld::ChunkManager* m : mChunkManagers)
             {
+                if (m->getGridMargin() >= 0)
+                {
+                    // a confined manager owns the active grid grown by its
+                    // margin and nothing else; without a grid it owns nothing.
+                    // The margin is the one the view was traversed with, so a
+                    // margin changed since (the views are rebuilt for it) does
+                    // not set this node against a border it was not split on.
+                    const int margin = borderMargin;
+                    if (!gridValid || margin < 0)
+                        continue;
+                    const float x0 = static_cast<float>(gridbounds.x() - margin);
+                    const float y0 = static_cast<float>(gridbounds.y() - margin);
+                    const float x1 = static_cast<float>(gridbounds.z() + margin);
+                    const float y1 = static_cast<float>(gridbounds.w() + margin);
+                    const bool inside = center.x() - halfSize >= x0 && center.y() - halfSize >= y0
+                        && center.x() + halfSize <= x1 && center.y() + halfSize <= y1;
+                    if (!inside)
+                    {
+                        const bool touches = center.x() + halfSize > x0 && center.y() + halfSize > y0
+                            && center.x() - halfSize < x1 && center.y() - halfSize < y1;
+                        // the LOD callback splits every node on the border, so
+                        // this is unreachable unless that rule is off or broken:
+                        // the part of such a node inside the border is drawn by nobody
+                        static std::atomic<unsigned int> reported{ 0 };
+                        if (touches && reported.fetch_add(1) < 8)
+                            Log(Debug::Error) << "Terrain: a rendered node crosses a confined chunk manager's border "
+                                                 "(node centre "
+                                              << center.x() << "," << center.y() << " size " << entry.mNode->getSize()
+                                              << " cells, border " << x0 << "," << y0 << " .. " << x1 << "," << y1
+                                              << "): its cells inside the border go undrawn by that manager";
+                        continue;
+                    }
+                }
                 osg::ref_ptr<osg::Node> n = m->getChunk(entry.mNode->getSize(), entry.mNode->getCenter(),
                     static_cast<unsigned char>(DefaultLodCallback::getNativeLodLevel(entry.mNode, mMinSize)),
                     entry.mLodFlags, activeGrid, vd->getViewPoint(), compile);
@@ -480,11 +538,14 @@ namespace Terrain
         bool needsUpdate = true;
         osg::Vec3f viewPoint = viewer ? nv.getViewPoint() : nv.getEyePoint();
         ViewData* vd = mViewDataMap->getViewData(viewer, viewPoint, mActiveGrid, needsUpdate);
+        // one read for the whole pass. A view kept from an earlier frame was
+        // traversed with this same margin: a changed margin rebuilds the views.
+        const int borderMargin = getBorderMargin();
         if (needsUpdate)
         {
             vd->reset();
             DefaultLodCallback lodCallback(
-                mLodFactor, mMinSize, mViewDistance, mActiveGrid, ESM::getCellSize(mWorldspace));
+                mLodFactor, mMinSize, mViewDistance, mActiveGrid, ESM::getCellSize(mWorldspace), borderMargin);
             mRootNode->traverseNodes(vd, viewPoint, &lodCallback);
         }
 
@@ -493,8 +554,48 @@ namespace Terrain
         for (unsigned int i = 0; i < vd->getNumEntries(); ++i)
         {
             ViewDataEntry& entry = vd->getEntry(i);
-            loadRenderingNode(entry, vd, cellWorldSize, mActiveGrid, false);
+            loadRenderingNode(entry, vd, cellWorldSize, mActiveGrid, borderMargin, false);
             entry.mRenderingNode->accept(nv);
+        }
+
+        // a view traversed just now: what the confined manager was handed in
+        // it. The cells can be counted against the land inside the border.
+        // For any visitor - after a grid change the first traversal is as
+        // often a ray cast's as a camera's, and the cameras then copy its view.
+        if (needsUpdate && borderMargin >= 0 && mActiveGrid.z() > mActiveGrid.x()
+            && mActiveGrid.w() > mActiveGrid.y())
+        {
+            const float x0 = static_cast<float>(mActiveGrid.x() - borderMargin);
+            const float y0 = static_cast<float>(mActiveGrid.y() - borderMargin);
+            const float x1 = static_cast<float>(mActiveGrid.z() + borderMargin);
+            const float y1 = static_cast<float>(mActiveGrid.w() + borderMargin);
+            unsigned int nodes = 0;
+            float cells = 0.f;
+            for (unsigned int i = 0; i < vd->getNumEntries(); ++i)
+            {
+                QuadTreeNode* node = vd->getEntry(i).mNode;
+                const float half = node->getSize() / 2;
+                const osg::Vec2f& c = node->getCenter();
+                if (c.x() - half >= x0 && c.y() - half >= y0 && c.x() + half <= x1 && c.y() + half <= y1)
+                {
+                    ++nodes;
+                    cells += node->getSize() * node->getSize();
+                }
+            }
+            // once per border and cell count, not once per view (a view is
+            // rebuilt every few steps, for every camera)
+            static std::mutex reportMutex;
+            static float reported[5] = { 0.f, 0.f, 0.f, 0.f, -1.f };
+            const float now[5] = { x0, y0, x1, y1, cells };
+            std::lock_guard<std::mutex> lock(reportMutex);
+            if (!std::equal(now, now + 5, reported))
+            {
+                std::copy(now, now + 5, reported);
+                Log(Debug::Verbose) << "Terrain: view at " << viewPoint.x() << "," << viewPoint.y() << ": "
+                                    << vd->getNumEntries() << " nodes, " << nodes << " of them (" << cells
+                                    << " cells) inside the confined manager's border " << x0 << "," << y0 << " .. "
+                                    << x1 << "," << y1;
+            }
         }
 
         if (mHeightCullCallback && isCullVisitor)
@@ -553,7 +654,9 @@ namespace Terrain
         vd->setViewPoint(viewPoint);
         vd->setActiveGrid(grid);
 
-        DefaultLodCallback lodCallback(mLodFactor, mMinSize, mViewDistance, grid, static_cast<int>(cellWorldSize));
+        const int borderMargin = getBorderMargin();
+        DefaultLodCallback lodCallback(
+            mLodFactor, mMinSize, mViewDistance, grid, static_cast<int>(cellWorldSize), borderMargin);
         mRootNode->traverseNodes(vd, viewPoint, &lodCallback);
 
         reporter.addTotal(vd->getNumEntries());
@@ -561,7 +664,7 @@ namespace Terrain
         for (unsigned int i = 0, n = vd->getNumEntries(); i < n && !abort; ++i)
         {
             ViewDataEntry& entry = vd->getEntry(i);
-            loadRenderingNode(entry, vd, cellWorldSize, grid, true);
+            loadRenderingNode(entry, vd, cellWorldSize, grid, borderMargin, true);
             reporter.addProgress(1);
         }
     }
@@ -601,6 +704,16 @@ namespace Terrain
             m->setMaxLodLevel(
                 DefaultLodCallback::convertDistanceToLodLevel(m->getViewDistance() + mViewDataMap->getReuseDistance(),
                     mMinSize, mLodFactor, ESM::getCellSize(mWorldspace)));
+    }
+
+    int QuadTreeWorld::getBorderMargin() const
+    {
+        // one border: the first confined manager's. A second manager with a
+        // different margin would trip the guard in loadRenderingNode.
+        for (const ChunkManager* m : mChunkManagers)
+            if (m->getGridMargin() >= 0)
+                return m->getGridMargin();
+        return -1;
     }
 
     void QuadTreeWorld::rebuildViews()

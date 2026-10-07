@@ -37,6 +37,9 @@
 #include <mutex>
 
 #include <osg/Depth>
+#include <osg/VertexAttribDivisor>
+
+#include <cstdint>
 
 #include <components/nifosg/matrixtransform.hpp>
 #include <components/resource/imagemanager.hpp>
@@ -55,6 +58,8 @@
 #include <components/esm3/loadcell.hpp>
 #include <components/esm3/loadcont.hpp>
 #include <components/esm3/loaddoor.hpp>
+#include <components/esm3/loadland.hpp>
+#include <components/misc/constants.hpp>
 #include <components/esm3/loadstat.hpp>
 #include <components/esm3/readerscache.hpp>
 #include <components/esm4/loadacti.hpp>
@@ -452,6 +457,10 @@ namespace MWRender
     {
         if (activeGrid && !mActiveGrid)
             return nullptr;
+        // store-once: the distant layer draws the cells beyond the viewing
+        // distance itself, and a paged chunk there would draw the same objects
+        // twice. The quadtree keeps this manager out of them (setGridMargin,
+        // updateOnceMargin): it is not asked for a chunk outside its square.
 
         const ChunkId id = std::make_tuple(center, size, activeGrid);
 
@@ -2189,6 +2198,7 @@ namespace MWRender
         , mMinSizeCostMultiplier(Settings::terrain().mObjectPagingMinSizeCostMultiplier)
         , mRefTrackerLocked(false)
     {
+        mStoreOnce = Settings::terrain().mDistantStaticsStoreOnce;
     }
 
     void ObjectPaging::setOcclusionCuller(SceneUtil::OcclusionCuller* culler, unsigned int maxTriangles)
@@ -2877,7 +2887,11 @@ namespace MWRender
         };
 
         // one serialized stateset record
-        void mwdsWriteStateSet(MwdsOut& out, const osg::StateSet* ss, const std::filesystem::path& file)
+        // diffuseOnly (the store-once layer): only the diffuse map is written;
+        // normal, parallax, specular, glow and detail maps stay with the near
+        // rendering, as in MGE XE's distant statics
+        void mwdsWriteStateSet(
+            MwdsOut& out, const osg::StateSet* ss, const std::filesystem::path& file, bool diffuseOnly = false)
         {
             // modes
             const auto& modes = ss->getModeList();
@@ -3042,6 +3056,8 @@ namespace MWRender
                 }
                 if (!tex)
                     continue;
+                if (diffuseOnly && !(texType == "diffuseMap" || (texType.empty() && unit == 0)))
+                    continue;
                 units.put(static_cast<std::uint32_t>(unit));
                 units.putStr(texType);
                 units.put(static_cast<std::uint32_t>(tex->getWrap(osg::Texture::WRAP_S)));
@@ -3085,8 +3101,80 @@ namespace MWRender
         // or state sorting degenerates to per-drawable rebinds
         std::mutex sMwdsTexCacheMutex;
         std::map<std::string, osg::ref_ptr<osg::Texture2D>> sMwdsTexCache;
+        // the store-once layer shares textures the same way but does not pin
+        // them: a texture lives while a stateset in the scene binds it
+        std::map<std::string, osg::observer_ptr<osg::Texture2D>> sMwdsTexCacheWeak;
 
-        osg::ref_ptr<osg::StateSet> mwdsReadStateSet(MwdsIn& in, Resource::ImageManager* imageManager)
+        // what the store-once layer's reduced textures saved, since the start
+        std::atomic<std::uint64_t> sOnceTexFullBytes{ 0 };
+        std::atomic<std::uint64_t> sOnceTexKeptBytes{ 0 };
+        std::atomic<unsigned int> sOnceTexLoaded{ 0 };
+
+        // The distant layer's own copy of a texture: the image without its
+        // 'skip' largest mipmap levels (skip 1 = half size each way, what MGE
+        // XE's distant land uses). The smaller levels of a mipmapped image are
+        // stored one after another behind the largest, so the copy is those
+        // bytes as they are - compressed or not, nothing is decoded. An image
+        // without mipmaps is scaled when it is not compressed, and returned as
+        // it is when it is. Images under 256 x 256 pixels are left alone:
+        // nothing to save there. 'full' is not modified.
+        osg::ref_ptr<osg::Image> mwdsReducedImage(
+            osg::Image* full, int skip, std::uint64_t& fullBytes, std::uint64_t& keptBytes)
+        {
+            fullBytes = keptBytes = (full && full->data()) ? full->getTotalSizeInBytesIncludingMipmaps() : 0;
+            if (!full || !full->data() || skip <= 0 || full->r() != 1)
+                return full;
+            int s = full->s();
+            int t = full->t();
+            unsigned int drop = 0;
+            while (drop < static_cast<unsigned int>(skip) && s >= 8 && t >= 8 && s * t >= 256 * 256)
+            {
+                s /= 2;
+                t /= 2;
+                ++drop;
+            }
+            if (drop == 0)
+                return full;
+            osg::ref_ptr<osg::Image> reduced;
+            if (full->isMipmap())
+            {
+                drop = std::min(drop, full->getNumMipmapLevels() - 1);
+                const unsigned int begin = full->getMipmapOffset(drop);
+                const unsigned int total = full->getTotalSizeInBytesIncludingMipmaps();
+                if (drop == 0 || begin == 0 || begin >= total)
+                    return full;
+                s = std::max(1, full->s() >> drop);
+                t = std::max(1, full->t() >> drop);
+                unsigned char* copy = new unsigned char[total - begin];
+                std::memcpy(copy, full->data() + begin, total - begin);
+                reduced = new osg::Image;
+                reduced->setImage(s, t, 1, full->getInternalTextureFormat(), full->getPixelFormat(),
+                    full->getDataType(), copy, osg::Image::USE_NEW_DELETE, static_cast<int>(full->getPacking()));
+                osg::Image::MipmapDataType offsets;
+                for (unsigned int level = drop + 1; level < full->getNumMipmapLevels(); ++level)
+                    offsets.push_back(full->getMipmapOffset(level) - begin);
+                reduced->setMipmapLevels(offsets);
+            }
+            else if (!full->isCompressed())
+            {
+                reduced = new osg::Image(*full, osg::CopyOp::DEEP_COPY_ALL);
+                reduced->scaleImage(s, t, 1);
+                if (reduced->s() != s || reduced->t() != t)
+                    return full; // the scaler declined (it reports why): the image stays whole
+            }
+            else
+                return full;
+            reduced->setOrigin(full->getOrigin());
+            reduced->setFileName(full->getFileName());
+            keptBytes = reduced->getTotalSizeInBytesIncludingMipmaps();
+            return reduced;
+        }
+
+        // skipMips > 0 (the store-once layer): a named image is held as its
+        // reduced copy, and the full image does not enter the image cache on
+        // this path's account
+        osg::ref_ptr<osg::StateSet> mwdsReadStateSet(
+            MwdsIn& in, Resource::ImageManager* imageManager, bool pinTextures = true, int skipMips = 0)
         {
             osg::ref_ptr<osg::StateSet> ss = new osg::StateSet;
             const std::uint32_t nModes = in.get<std::uint32_t>();
@@ -3184,13 +3272,25 @@ namespace MWRender
                 {
                     texKey = name + "|" + std::to_string(wrapS) + "|" + std::to_string(wrapT) + "|"
                         + std::to_string(minF) + "|" + std::to_string(magF) + "|"
-                        + std::to_string(static_cast<int>(aniso * 16.f));
+                        + std::to_string(static_cast<int>(aniso * 16.f)) + "|" + std::to_string(skipMips);
                     {
                         std::lock_guard<std::mutex> lock(sMwdsTexCacheMutex);
-                        const auto found = sMwdsTexCache.find(texKey);
-                        if (found != sMwdsTexCache.end())
+                        osg::ref_ptr<osg::Texture2D> shared;
+                        if (pinTextures)
                         {
-                            ss->setTextureAttributeAndModes(unit, found->second, osg::StateAttribute::ON);
+                            const auto found = sMwdsTexCache.find(texKey);
+                            if (found != sMwdsTexCache.end())
+                                shared = found->second;
+                        }
+                        else
+                        {
+                            const auto found = sMwdsTexCacheWeak.find(texKey);
+                            if (found != sMwdsTexCacheWeak.end())
+                                found->second.lock(shared);
+                        }
+                        if (shared)
+                        {
+                            ss->setTextureAttributeAndModes(unit, shared, osg::StateAttribute::ON);
                             if (!texType.empty())
                                 ss->setTextureAttributeAndModes(
                                     unit, new SceneUtil::TextureType(texType), osg::StateAttribute::ON);
@@ -3199,7 +3299,34 @@ namespace MWRender
                     }
                     try
                     {
-                        image = imageManager->getImage(VFS::Path::Normalized(std::string_view(name)));
+                        if (skipMips > 0)
+                        {
+                            std::uint64_t fullBytes = 0;
+                            std::uint64_t keptBytes = 0;
+                            const osg::ref_ptr<osg::Image> full
+                                = imageManager->getImageUncached(VFS::Path::Normalized(std::string_view(name)));
+                            image = mwdsReducedImage(full.get(), skipMips, fullBytes, keptBytes);
+                            sOnceTexFullBytes += fullBytes;
+                            sOnceTexKeptBytes += keptBytes;
+                            ++sOnceTexLoaded;
+                            // OPENMW_DL_TEXTURE_REPORT=<file>: one line per texture as it is
+                            // loaded (name, size, levels and bytes before and after), for
+                            // checking the reduction against the files themselves
+                            static const char* const reportPath = getenv("OPENMW_DL_TEXTURE_REPORT");
+                            if (reportPath && full && image)
+                            {
+                                static std::mutex reportMutex;
+                                static std::ofstream report(reportPath, std::ios::app);
+                                std::lock_guard<std::mutex> reportLock(reportMutex);
+                                report << name << '\t' << full->s() << '\t' << full->t() << '\t'
+                                       << full->getNumMipmapLevels() << '\t' << (full->isCompressed() ? 1 : 0) << '\t'
+                                       << fullBytes << '\t' << image->s() << '\t' << image->t() << '\t'
+                                       << image->getNumMipmapLevels() << '\t' << keptBytes << '\n';
+                                report.flush();
+                            }
+                        }
+                        else
+                            image = imageManager->getImage(VFS::Path::Normalized(std::string_view(name)));
                     }
                     catch (const std::exception& e)
                     {
@@ -3236,8 +3363,20 @@ namespace MWRender
                 if (!texKey.empty())
                 {
                     std::lock_guard<std::mutex> lock(sMwdsTexCacheMutex);
-                    const auto emplaced = sMwdsTexCache.emplace(texKey, tex);
-                    tex = emplaced.first->second; // racer's copy wins, all share one
+                    if (pinTextures)
+                    {
+                        const auto emplaced = sMwdsTexCache.emplace(texKey, tex);
+                        tex = emplaced.first->second; // racer's copy wins, all share one
+                    }
+                    else
+                    {
+                        osg::observer_ptr<osg::Texture2D>& slot = sMwdsTexCacheWeak[texKey];
+                        osg::ref_ptr<osg::Texture2D> racer;
+                        if (slot.lock(racer))
+                            tex = racer;
+                        else
+                            slot = tex;
+                    }
                 }
                 ss->setTextureAttributeAndModes(unit, tex, osg::StateAttribute::ON);
                 if (!texType.empty())
@@ -3556,6 +3695,58 @@ namespace MWRender
         const char* const sClassSuffix[3] = { ".near.mwds", ".far.mwds", ".vf.mwds" };
         const char* const sClassName[3] = { ".near", ".far", ".vf" };
 
+        // ==== store-once layout ====
+        // <dir>/dl_X_Y.mwdp   one per supercell: a table of model names, then
+        //                     per (class, cell) block a list of placements
+        // <dir>/meshes/m_<fnv64 of the model name>.mwds
+        //                     one per distinct model: its flattened parts in
+        //                     model space, in the mwds format above (one
+        //                     cluster, world centre 0), diffuse texture only
+        constexpr std::uint32_t sMwdpMagic = 0x5044574Du; // "mwdp"
+        constexpr std::uint32_t sMwdpVersion = 1;
+        const char* const sOnceSuffix = ".mwdp";
+
+        struct OncePlacement
+        {
+            std::uint32_t mModel = 0; // index into the file's model table
+            osg::Vec3f mPosition; // supercell-local
+            osg::Vec4f mRotation; // quaternion x, y, z, w
+            float mScale = 1.f;
+        };
+        static_assert(sizeof(OncePlacement) == 36);
+
+        std::string onceMeshFileName(const std::string& model)
+        {
+            const std::uint64_t h = chunkCacheFnv1a(0xcbf29ce484222325ull, model.data(), model.size());
+            char buf[40];
+            std::snprintf(buf, sizeof(buf), "m_%016llx.mwds", static_cast<unsigned long long>(h));
+            return buf;
+        }
+
+        // atomic write via temp file, same discipline as the osgb path
+        bool mwdsWriteFileAtomic(const MwdsOut& out, const std::filesystem::path& file)
+        {
+            const std::filesystem::path tmp = file.string() + ".tmp";
+            {
+                std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+                f.write(out.mBuf.data(), static_cast<std::streamsize>(out.mBuf.size()));
+                if (!f.good())
+                {
+                    std::error_code ec;
+                    std::filesystem::remove(tmp, ec);
+                    return false;
+                }
+            }
+            std::error_code ec;
+            std::filesystem::rename(tmp, file, ec);
+            if (ec)
+            {
+                std::filesystem::remove(file, ec);
+                std::filesystem::rename(tmp, file, ec);
+            }
+            return !ec;
+        }
+
         // MGE-style band separation, evaluated live per frame: a resident
         // block renders only when it is (a) not already covered by stock
         // rendering (which reaches the viewing distance) and (b) inside its
@@ -3622,8 +3813,504 @@ namespace MWRender
         };
     }
 
+    namespace
+    {
+        // ==== store-once: drawing ====
+        // One drawable = one part of one model, drawn mNumInstances times from
+        // two per-instance attribute arrays (slots 6 and 7, divisor 1:
+        // position + scale, rotation quaternion). objects.vert places each
+        // copy under MGE_DL_INSTANCED. Vertex arrays, index buffers and the
+        // stateset are the library part's own objects - nothing but the two
+        // instance arrays exists per block.
+        constexpr unsigned int sOnceAttribPosition = 6;
+        constexpr unsigned int sOnceAttribRotation = 7;
+
+        // what the layer actually put through the GPU, reported to the log
+        // (verbose) every few hundred frames: a layer that is loaded but never
+        // drawn must be visible as such
+        std::atomic<std::uint64_t> sOnceDrawables{ 0 };
+        std::atomic<std::uint64_t> sOnceCopies{ 0 };
+
+        class OnceGeometry : public osg::Geometry
+        {
+        public:
+            OnceGeometry(const osg::Geometry& part, unsigned int numInstances, const osg::BoundingBox& box)
+                : osg::Geometry(part, osg::CopyOp::SHALLOW_COPY)
+                , mNumInstances(static_cast<GLsizei>(numInstances))
+                , mBox(box)
+            {
+                setDataVariance(osg::Object::STATIC);
+                // the copy carries the part's own cached bound (the model at its origin)
+                dirtyBound();
+            }
+
+            // Geometry::drawImplementation with the instance count taken from
+            // the drawable instead of the (shared) primitive sets
+            void drawImplementation(osg::RenderInfo& renderInfo) const override
+            {
+                sOnceDrawables.fetch_add(1, std::memory_order_relaxed);
+                sOnceCopies.fetch_add(static_cast<std::uint64_t>(mNumInstances), std::memory_order_relaxed);
+                osg::State& state = *renderInfo.getState();
+                drawVertexArraysImplementation(renderInfo);
+                osg::VertexArrayState* vas = state.getCurrentVertexArrayState();
+                const bool useVbo
+                    = state.useVertexBufferObject(_supportsVertexBufferObjects && _useVertexBufferObjects);
+                for (const osg::ref_ptr<osg::PrimitiveSet>& prim : _primitives)
+                {
+                    if (const osg::DrawElements* elements = prim->getDrawElements())
+                    {
+                        const GLenum type = const_cast<osg::DrawElements*>(elements)->getDataType();
+                        osg::GLBufferObject* ebo
+                            = useVbo ? elements->getOrCreateGLBufferObject(state.getContextID()) : nullptr;
+                        if (ebo)
+                        {
+                            vas->bindElementBufferObject(ebo);
+                            state.glDrawElementsInstanced(elements->getMode(),
+                                static_cast<GLsizei>(elements->getNumIndices()), type,
+                                reinterpret_cast<const GLvoid*>(
+                                    static_cast<std::uintptr_t>(ebo->getOffset(elements->getBufferIndex()))),
+                                mNumInstances);
+                        }
+                        else
+                        {
+                            vas->unbindElementBufferObject();
+                            state.glDrawElementsInstanced(elements->getMode(),
+                                static_cast<GLsizei>(elements->getNumIndices()), type, elements->getDataPointer(),
+                                mNumInstances);
+                        }
+                    }
+                    else if (const osg::DrawArrays* arrays = dynamic_cast<const osg::DrawArrays*>(prim.get()))
+                        state.glDrawArraysInstanced(
+                            arrays->getMode(), arrays->getFirst(), arrays->getCount(), mNumInstances);
+                }
+                if (useVbo && !state.useVertexArrayObject(_useVertexArrayObject))
+                {
+                    vas->unbindVertexBufferObject();
+                    vas->unbindElementBufferObject();
+                }
+            }
+
+            // every copy's bound, known when the block is built
+            osg::BoundingBox computeBoundingBox() const override { return mBox; }
+
+            // The triangles sit at the model's origin; the copies exist only in
+            // the vertex shader. Ray casts and triangle collectors must not see
+            // them (they would find the model at the supercell's centre).
+            bool supports(const osg::PrimitiveFunctor&) const override { return false; }
+            void accept(osg::PrimitiveFunctor&) const override {}
+            bool supports(const osg::PrimitiveIndexFunctor&) const override { return false; }
+            void accept(osg::PrimitiveIndexFunctor&) const override {}
+
+        private:
+            GLsizei mNumInstances;
+            osg::BoundingBox mBox;
+        };
+
+        struct OncePart
+        {
+            // arrays + index buffers + stateset with its shader program: a
+            // template for OnceGeometry, never itself in the scene
+            osg::ref_ptr<osg::Geometry> mGeometry;
+            float mRadius = 0.f; // farthest vertex from the model's origin
+        };
+
+        class OnceMesh : public osg::Referenced
+        {
+        public:
+            std::vector<OncePart> mParts;
+        };
+
+        // keeps a node's models in the library for as long as the node lives
+        class OnceMeshHolder : public osg::Referenced
+        {
+        public:
+            std::vector<osg::ref_ptr<osg::Referenced>> mMeshes;
+        };
+
+        // Identical statesets across models are one object, or state sorting
+        // degenerates to a rebind per drawable. Weak: a stateset (and its
+        // textures) lives while a model in the library uses it. Guarded by the
+        // library mutex (models load one at a time).
+        std::map<std::string, osg::observer_ptr<osg::StateSet>> sOnceStateCache;
+
+        void onceBakeMatrix(osg::Geometry& geom, const osg::Matrixf& matrix)
+        {
+            if (osg::Vec3Array* verts = dynamic_cast<osg::Vec3Array*>(geom.getVertexArray()))
+                for (osg::Vec3f& v : *verts)
+                    v = v * matrix;
+            if (osg::Vec3Array* normals = dynamic_cast<osg::Vec3Array*>(geom.getNormalArray()))
+                for (osg::Vec3f& n : *normals)
+                {
+                    n = osg::Matrixf::transform3x3(n, matrix);
+                    n.normalize();
+                }
+        }
+
+        osg::ref_ptr<OnceMesh> loadOnceMesh(const std::filesystem::path& file, Resource::SceneManager* sceneManager)
+        {
+            osg::ref_ptr<OnceMesh> mesh = new OnceMesh;
+            std::vector<char> buf;
+            {
+                std::ifstream f(file, std::ios::binary | std::ios::ate);
+                if (!f.is_open())
+                {
+                    Log(Debug::Warning) << "Distant statics: no library mesh " << file.filename();
+                    return mesh;
+                }
+                const std::streamsize size = f.tellg();
+                f.seekg(0);
+                buf.resize(static_cast<std::size_t>(size));
+                if (!f.read(buf.data(), size))
+                    return mesh;
+            }
+            MwdsIn in{ buf.data(), buf.data() + buf.size() };
+            if (in.get<std::uint32_t>() != sMwdsMagic || in.get<std::uint32_t>() != sMwdsVersion)
+            {
+                Log(Debug::Error) << "MWDS: bad magic/version: " << file.filename();
+                return mesh;
+            }
+            in.get<osg::Vec3f>(); // world centre: zero for a library mesh
+
+            const std::uint32_t nStateSets = in.get<std::uint32_t>();
+            std::vector<osg::ref_ptr<osg::StateSet>> stateSets;
+            std::vector<char> fresh; // 1 = not yet through the shader visitor
+            Resource::ImageManager* imageManager = sceneManager->getImageManager();
+            for (std::uint32_t i = 0; i < nStateSets && !in.mFail; ++i)
+            {
+                const char* begin = in.mPtr;
+                // the layer's textures at reduced size ('distant statics texture skip')
+                osg::ref_ptr<osg::StateSet> ss
+                    = mwdsReadStateSet(in, imageManager, false, Settings::terrain().mDistantStaticsTextureSkip);
+                if (in.mFail)
+                    break;
+                osg::observer_ptr<osg::StateSet>& slot = sOnceStateCache[std::string(begin, in.mPtr)];
+                osg::ref_ptr<osg::StateSet> shared;
+                if (slot.lock(shared))
+                {
+                    stateSets.push_back(shared);
+                    fresh.push_back(0);
+                }
+                else
+                {
+                    slot = ss;
+                    stateSets.push_back(ss);
+                    fresh.push_back(1);
+                }
+            }
+
+            osg::ref_ptr<osg::Group> shaderPass = new osg::Group;
+            const std::uint32_t nClasses = in.get<std::uint32_t>();
+            for (std::uint32_t c = 0; c < nClasses && !in.mFail; ++c)
+            {
+                in.get<osg::Vec3f>(); // cluster bound and class: one cluster, unused
+                in.get<float>();
+                in.get<std::uint32_t>();
+                const std::uint32_t nGeoms = in.get<std::uint32_t>();
+                for (std::uint32_t g = 0; g < nGeoms && !in.mFail; ++g)
+                {
+                    const std::uint32_t ssIdx = in.get<std::uint32_t>();
+                    const std::uint8_t hasMatrix = in.get<std::uint8_t>();
+                    osg::Matrixf matrix;
+                    if (hasMatrix)
+                    {
+                        const char* mdata = in.getBytes(16 * sizeof(float));
+                        if (in.mFail)
+                            break;
+                        std::memcpy(matrix.ptr(), mdata, 16 * sizeof(float));
+                    }
+                    osg::ref_ptr<osg::Geometry> geom = mwdsReadGeometry(in);
+                    if (!geom)
+                    {
+                        in.mFail = true;
+                        break;
+                    }
+                    if (hasMatrix)
+                        onceBakeMatrix(*geom, matrix);
+                    if (ssIdx < stateSets.size())
+                    {
+                        geom->setStateSet(stateSets[ssIdx]);
+                        if (fresh[ssIdx])
+                        {
+                            shaderPass->addChild(geom);
+                            fresh[ssIdx] = 0;
+                        }
+                    }
+                    OncePart part;
+                    part.mGeometry = geom;
+                    if (const osg::Vec3Array* verts = dynamic_cast<const osg::Vec3Array*>(geom->getVertexArray()))
+                        for (const osg::Vec3f& v : *verts)
+                            part.mRadius = std::max(part.mRadius, v.length());
+                    mesh->mParts.push_back(part);
+                }
+            }
+            if (in.mFail)
+            {
+                Log(Debug::Error) << "MWDS: truncated/corrupt library mesh: " << file.filename();
+                mesh->mParts.clear();
+                return mesh;
+            }
+            if (shaderPass->getNumChildren())
+            {
+                // the layer is diffuse-only by design: the visitor must not
+                // find the normal and specular maps again by file name
+                sceneManager->createShadersDiffuseOnly(shaderPass);
+                shaderPass->removeChildren(0, shaderPass->getNumChildren());
+            }
+            return mesh;
+        }
+
+        // A block (one cell, one class) of the store-once layer draws when
+        // stock rendering does not draw its cell, and within its class's end
+        // distance ('distant statics end *', 0 = to the far plane). Stock
+        // draws the loaded grid (the real objects are in the scene) and, out
+        // to the viewing distance, the cells object paging covers - which are
+        // the cells with land: the terrain quadtree has no node for a cell
+        // without it, so paging never sees the objects there and the layer
+        // keeps them. Read live, per frame.
+        class OnceBlockCullCallback
+            : public SceneUtil::NodeCallback<OnceBlockCullCallback, osg::Node*, osgUtil::CullVisitor*>
+        {
+        public:
+            OnceBlockCullCallback(const osg::Vec3f& centerLocal, float radius, int cls, int cellX, int cellY,
+                bool paged, const ObjectPaging* paging)
+                : mCenterLocal(centerLocal)
+                , mRadius(radius)
+                , mClass(cls)
+                , mCellX(cellX)
+                , mCellY(cellY)
+                , mPaged(paged)
+                , mPaging(paging)
+            {
+            }
+            void operator()(osg::Node* node, osgUtil::CullVisitor* cv)
+            {
+                if (mPaging->isOnceCellLoaded(mCellX, mCellY))
+                    return;
+                if (mPaged && mPaging->isOnceCellStock(mCellX, mCellY))
+                    return;
+                float end = 0.f;
+                switch (mClass)
+                {
+                    case 0:
+                        end = Settings::terrain().mDistantStaticsEndNear;
+                        break;
+                    case 1:
+                        end = Settings::terrain().mDistantStaticsEndFar;
+                        break;
+                    default:
+                        end = Settings::terrain().mDistantStaticsEndVeryFar;
+                        break;
+                }
+                if (end > 0.f && (cv->getViewPointLocal() - mCenterLocal).length() - mRadius > end)
+                    return;
+                traverse(node, cv);
+            }
+
+        private:
+            osg::Vec3f mCenterLocal;
+            float mRadius;
+            int mClass;
+            int mCellX;
+            int mCellY;
+            bool mPaged; // the cell has land, so stock object paging can cover it
+            const ObjectPaging* mPaging; // lifetimes colocated, as RingDrainCallback
+        };
+    }
+
+    void ObjectPaging::configureOnceRoot(osg::StateSet* stateset)
+    {
+        stateset->setDefine("MGE_DL_INSTANCED", "1", osg::StateAttribute::ON);
+        stateset->setAttribute(new osg::VertexAttribDivisor(sOnceAttribPosition, 1));
+        stateset->setAttribute(new osg::VertexAttribDivisor(sOnceAttribRotation, 1));
+    }
+
+    void ObjectPaging::setOnceActiveGrid(const osg::Vec4i& grid)
+    {
+        // an empty grid (no exterior loaded) stays the far-away empty one
+        const bool valid = grid.z() > grid.x() && grid.w() > grid.y();
+        const int empty[4] = { INT_MAX / 2, INT_MAX / 2, INT_MIN / 2, INT_MIN / 2 };
+        for (int i = 0; i < 4; ++i)
+            mOnceGrid[i] = valid ? grid[i] : empty[i];
+        updateOnceMargin();
+    }
+
+    void ObjectPaging::updateOnceMargin()
+    {
+        if (!mStoreOnce || !mResidentDistantStatics.load())
+        {
+            setGridMargin(-1); // no layer: stock object paging everywhere
+            return;
+        }
+        // the loaded grid already reaches CellGridRadius cells from the
+        // player's cell (Scene::gridCenterToBounds - the layer exists in the
+        // Morrowind worldspace only); the margin is what is missing to
+        // 'stock cells'. From the constant, not from the reported grid: a
+        // terrain view preloaded for a predicted grid before any exterior is
+        // loaded has to be built with the same margin.
+        setGridMargin(std::max(0, mOnceStockCells.load() - Constants::CellGridRadius));
+    }
+
+    bool ObjectPaging::setOnceDistances(int stockCells, float farDistance)
+    {
+        const bool farChanged = mOnceFarDistance.exchange(farDistance) != farDistance;
+        const int before = getGridMargin();
+        mOnceStockCells = std::max(0, stockCells);
+        updateOnceMargin();
+        const bool squareChanged = getGridMargin() != before;
+        if (farChanged || squareChanged)
+        {
+            mRingDirty = true; // the rings follow the far distance
+            if (mStoreOnce && mResidentDistantStatics.load())
+                Log(Debug::Info) << "Distant statics (store-once): stock objects out to " << mOnceStockCells.load()
+                                 << " cells from the player's cell (viewing distance), the layer beyond; the picture "
+                                    "ends at "
+                                 << farDistance << " units";
+        }
+        return squareChanged;
+    }
+
+    osg::ref_ptr<osg::Referenced> ObjectPaging::getOnceMesh(const std::string& model)
+    {
+        std::lock_guard<std::mutex> lock(mOnceLibraryMutex);
+        osg::observer_ptr<osg::Referenced>& slot = mOnceLibrary[model];
+        osg::ref_ptr<osg::Referenced> alive;
+        if (slot.lock(alive))
+            return alive;
+        osg::ref_ptr<OnceMesh> mesh = loadOnceMesh(mResidentDir / "meshes" / onceMeshFileName(model), mSceneManager);
+        slot = mesh.get();
+        return mesh;
+    }
+
+    osg::ref_ptr<osg::Node> ObjectPaging::readSupercellOnce(const std::filesystem::path& file, int cls)
+    {
+        std::vector<char> buf;
+        {
+            std::ifstream f(file, std::ios::binary | std::ios::ate);
+            if (!f.is_open())
+                return nullptr;
+            const std::streamsize size = f.tellg();
+            f.seekg(0);
+            buf.resize(static_cast<std::size_t>(size));
+            if (!f.read(buf.data(), size))
+                return nullptr;
+        }
+        MwdsIn in{ buf.data(), buf.data() + buf.size() };
+        if (in.get<std::uint32_t>() != sMwdpMagic || in.get<std::uint32_t>() != sMwdpVersion)
+        {
+            Log(Debug::Error) << "MWDP: bad magic/version: " << file.filename();
+            return nullptr;
+        }
+        const osg::Vec3f worldCenter = in.get<osg::Vec3f>();
+        const std::uint32_t nModels = in.get<std::uint32_t>();
+        std::vector<std::string> models;
+        for (std::uint32_t i = 0; i < nModels && !in.mFail; ++i)
+            models.push_back(in.getStr());
+
+        osg::ref_ptr<OnceMeshHolder> holder = new OnceMeshHolder;
+        std::vector<osg::ref_ptr<OnceMesh>> meshes(models.size());
+        std::vector<char> meshTried(models.size(), 0);
+
+        osg::ref_ptr<osg::Group> container = new osg::Group;
+        const std::uint32_t nBlocks = in.get<std::uint32_t>();
+        for (std::uint32_t b = 0; b < nBlocks && !in.mFail; ++b)
+        {
+            const std::uint32_t blockClass = in.get<std::uint32_t>();
+            const std::int32_t cellX = in.get<std::int32_t>();
+            const std::int32_t cellY = in.get<std::int32_t>();
+            const std::uint32_t count = in.get<std::uint32_t>();
+            const char* data = in.getBytes(static_cast<std::size_t>(count) * sizeof(OncePlacement));
+            if (in.mFail)
+                break;
+            if (static_cast<int>(blockClass) != cls)
+                continue;
+
+            // the block's placements, model by model
+            std::map<std::uint32_t, std::vector<OncePlacement>> byModel;
+            for (std::uint32_t i = 0; i < count; ++i)
+            {
+                OncePlacement p;
+                std::memcpy(&p, data + static_cast<std::size_t>(i) * sizeof(OncePlacement), sizeof(OncePlacement));
+                byModel[p.mModel].push_back(p);
+            }
+
+            osg::ref_ptr<osg::Group> block = new osg::Group;
+            block->setDataVariance(osg::Object::STATIC);
+            osg::BoundingBox blockBox;
+            for (const auto& [modelIndex, list] : byModel)
+            {
+                if (modelIndex >= models.size())
+                    continue;
+                if (!meshTried[modelIndex])
+                {
+                    meshTried[modelIndex] = 1;
+                    osg::ref_ptr<osg::Referenced> loaded = getOnceMesh(models[modelIndex]);
+                    meshes[modelIndex] = static_cast<OnceMesh*>(loaded.get());
+                    holder->mMeshes.push_back(loaded);
+                }
+                const OnceMesh* mesh = meshes[modelIndex].get();
+                if (!mesh || mesh->mParts.empty())
+                    continue;
+
+                osg::ref_ptr<osg::Vec4Array> positions = new osg::Vec4Array(static_cast<unsigned int>(list.size()));
+                osg::ref_ptr<osg::Vec4Array> rotations = new osg::Vec4Array(static_cast<unsigned int>(list.size()));
+                for (std::size_t i = 0; i < list.size(); ++i)
+                {
+                    (*positions)[i] = osg::Vec4f(list[i].mPosition, list[i].mScale);
+                    (*rotations)[i] = list[i].mRotation;
+                }
+                // their own buffer: attached without one, the arrays would join
+                // the model's shared vertex buffer and dirty it for every block
+                osg::ref_ptr<osg::VertexBufferObject> instanceBuffer = new osg::VertexBufferObject;
+                positions->setVertexBufferObject(instanceBuffer);
+                rotations->setVertexBufferObject(instanceBuffer);
+
+                for (const OncePart& part : mesh->mParts)
+                {
+                    osg::BoundingBox box;
+                    for (const OncePlacement& p : list)
+                    {
+                        const float r = part.mRadius * p.mScale;
+                        box.expandBy(p.mPosition - osg::Vec3f(r, r, r));
+                        box.expandBy(p.mPosition + osg::Vec3f(r, r, r));
+                    }
+                    osg::ref_ptr<OnceGeometry> geom
+                        = new OnceGeometry(*part.mGeometry, static_cast<unsigned int>(list.size()), box);
+                    geom->setVertexAttribArray(sOnceAttribPosition, positions, osg::Array::BIND_PER_VERTEX);
+                    geom->setVertexAttribArray(sOnceAttribRotation, rotations, osg::Array::BIND_PER_VERTEX);
+                    block->addChild(geom);
+                    blockBox.expandBy(box);
+                }
+            }
+            if (!block->getNumChildren())
+                continue;
+            // TerrainStorage::hasData for this worldspace: the quadtree has a
+            // node, and so object paging a chunk, only for a cell with land
+            const bool paged
+                = MWBase::Environment::get().getESMStore()->get<ESM::Land>().search(cellX, cellY) != nullptr;
+            block->addCullCallback(
+                new OnceBlockCullCallback(blockBox.center(), blockBox.radius(), cls, cellX, cellY, paged, this));
+            container->addChild(block);
+        }
+        if (in.mFail)
+        {
+            Log(Debug::Error) << "MWDP: truncated/corrupt file: " << file.filename();
+            return nullptr;
+        }
+        if (!container->getNumChildren())
+            return nullptr;
+
+        osg::ref_ptr<osg::MatrixTransform> root = new osg::MatrixTransform(osg::Matrixf::translate(worldCenter));
+        root->setDataVariance(osg::Object::STATIC);
+        root->addChild(container);
+        root->setUserData(holder);
+        root->getBound();
+        root->setNodeMask(Mask_DistantStatics);
+        return root;
+    }
+
     bool ObjectPaging::writeSupercellFlat(const osg::Vec3f& worldCenter,
-        const std::vector<std::pair<osg::ref_ptr<osg::Group>, int>>& blocks, const std::filesystem::path& file)
+        const std::vector<std::pair<osg::ref_ptr<osg::Group>, int>>& blocks, const std::filesystem::path& file,
+        bool diffuseOnly)
     {
         MwdsOut out;
         out.put(sMwdsMagic);
@@ -3667,7 +4354,7 @@ namespace MWRender
                 for (const osg::StateSet* ss : g.mChain)
                     effective->merge(*ss);
                 MwdsOut ssOut;
-                mwdsWriteStateSet(ssOut, effective.get(), file);
+                mwdsWriteStateSet(ssOut, effective.get(), file, diffuseOnly);
                 const auto emplaced = bytesToRecord.emplace(ssOut.mBuf, static_cast<std::uint32_t>(records.size()));
                 if (emplaced.second)
                     records.push_back(std::move(ssOut.mBuf));
@@ -3697,26 +4384,60 @@ namespace MWRender
             }
         }
 
-        // atomic write via temp file, same discipline as the osgb path
-        const std::filesystem::path tmp = file.string() + ".tmp";
+        return mwdsWriteFileAtomic(out, file);
+    }
+
+    std::filesystem::path ObjectPaging::distantStaticsDir(const std::filesystem::path& cacheDir)
+    {
+        return cacheDir / (Settings::terrain().mDistantStaticsStoreOnce ? "distant-statics-once" : "distant-statics");
+    }
+
+    bool ObjectPaging::writeOnceMesh(
+        const std::string& model, const osg::Node* templateNode, const std::filesystem::path& dir)
+    {
+        const std::filesystem::path meshDir = dir / "meshes";
+        const std::filesystem::path file = meshDir / onceMeshFileName(model);
         {
-            std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
-            f.write(out.mBuf.data(), static_cast<std::streamsize>(out.mBuf.size()));
-            if (!f.good())
-            {
-                std::error_code ec;
-                std::filesystem::remove(tmp, ec);
-                return false;
-            }
+            std::lock_guard<std::mutex> lock(mOnceMeshMutex);
+            if (!mOnceMeshesWritten.insert(model).second)
+                return true; // written (or found) earlier in this process
         }
         std::error_code ec;
-        std::filesystem::rename(tmp, file, ec);
-        if (ec)
-        {
-            std::filesystem::remove(file, ec);
-            std::filesystem::rename(tmp, file, ec);
-        }
-        return !ec;
+        // a generator run rewrites each mesh once, so a changed model file is
+        // picked up; the in-game save-state refresh only fills in what is missing
+        if (!sGenerationMode && std::filesystem::exists(file, ec))
+            return true;
+        std::filesystem::create_directories(meshDir, ec);
+
+        // the same copy and flatten the merged layout applies per reference,
+        // here once, at the identity transform
+        constexpr auto copyMask = ~Mask_UpdateVisitor;
+        CopyOp copyop(false, copyMask);
+        copyop.mOptimizeBillboards = true;
+        osg::ref_ptr<osg::Group> group = new osg::Group;
+        // A billboard is frozen to face -(view vector + the reference's
+        // offset). The merged layout bakes that per reference; here there is no
+        // offset, and its (0, 0, 1) would be parallel to the up axis - a zero
+        // cross product, NaN vertices. A horizontal facing instead: one fixed
+        // orientation per model, turned with each copy.
+        copyop.mViewVector = osg::Vec3f(0.f, 1.f, 0.f);
+        copyop.mDistances = LODRange{ 0.f, std::numeric_limits<float>::max() };
+        copyop.setCopyFlags(osg::CopyOp::DEEP_COPY_NODES | osg::CopyOp::DEEP_COPY_DRAWABLES);
+        copyop.copy(templateNode, group);
+        Log(Debug::Verbose) << "Distant mesh " << model << ": copied, " << group->getNumChildren() << " top nodes";
+
+        SceneUtil::Optimizer optimizer;
+        optimizer.setMergeAlphaBlending(true);
+        optimizer.setIsOperationPermissibleForObjectCallback(new CanOptimizeCallback);
+        optimizer.optimize(group,
+            SceneUtil::Optimizer::FLATTEN_STATIC_TRANSFORMS | SceneUtil::Optimizer::REMOVE_REDUNDANT_NODES
+                | SceneUtil::Optimizer::MERGE_GEOMETRY);
+
+        Log(Debug::Verbose) << "Distant mesh " << model << ": flattened";
+
+        std::vector<std::pair<osg::ref_ptr<osg::Group>, int>> blocks;
+        blocks.emplace_back(group, 0);
+        return writeSupercellFlat(osg::Vec3f(), blocks, file, true);
     }
 
     osg::ref_ptr<osg::Node> ObjectPaging::readSupercellFlat(const std::filesystem::path& file)
@@ -3809,6 +4530,7 @@ namespace MWRender
         outWritten = false;
         const MWWorld::ESMStore& store = *MWBase::Environment::get().getESMStore();
         const float cellSizeUnits = static_cast<float>(getCellSize(mWorldspace));
+        const bool storeOnce = Settings::terrain().mDistantStaticsStoreOnce;
 
         std::map<ESM::RefNum, PagedCellRef> refs
             = collectESM3References(static_cast<float>(sSupercellSize), startCell, store);
@@ -3837,7 +4559,9 @@ namespace MWRender
         {
             // generator version: bump to invalidate every sidecar when the
             // bake output changes without its inputs changing
-            constexpr std::uint32_t genVersion = 8; // 8: per-cell blocks, runtime band/end culling
+            // 8: per-cell blocks, runtime band/end culling
+            // 1001: the store-once layout (placements + mesh library), its own directory
+            const std::uint32_t genVersion = storeOnce ? 1001u : 8u;
             hash = chunkCacheFnv1a(hash, &genVersion, sizeof(genVersion));
         }
         {
@@ -3889,6 +4613,11 @@ namespace MWRender
                 blockGroup[k][b] = new osg::Group;
         CopyOp copyop(false, copyMask);
         copyop.mOptimizeBillboards = true;
+
+        // store-once: a block is a list of placements into a table of models
+        std::vector<OncePlacement> oncePlacements[3][sSupercellSize * sSupercellSize];
+        std::map<std::string, std::uint32_t> onceModelIndex;
+        std::vector<std::string> onceModels;
 
         std::map<const osg::Node*, float> geomRadiusCache;
         unsigned int instances = 0;
@@ -3977,11 +4706,48 @@ namespace MWRender
             if (cls < 0)
                 continue;
 
+            const osg::Quat refRotation = osg::Quat(ref.mRotation.z(), osg::Vec3f(0, 0, -1))
+                * osg::Quat(ref.mRotation.y(), osg::Vec3f(0, -1, 0))
+                * osg::Quat(ref.mRotation.x(), osg::Vec3f(-1, 0, 0));
+
+            if (storeOnce)
+            {
+                // the mesh goes to the library once; this reference is a
+                // 36-byte placement (the same scale, rotation and position the
+                // merged layout bakes into the vertices)
+                const auto indexed
+                    = onceModelIndex.emplace(model.value(), static_cast<std::uint32_t>(onceModels.size()));
+                if (indexed.second)
+                {
+                    onceModels.push_back(model.value());
+                    if (!writeOnceMesh(model.value(), cnode.get(), outDir))
+                    {
+                        ++mWriteFailures;
+                        Log(Debug::Error) << "Failed to store distant mesh " << model.value()
+                                          << " (write error - disk full?)";
+                    }
+                }
+                OncePlacement placement;
+                placement.mModel = indexed.first->second;
+                placement.mPosition = ref.mPosition - worldCenter;
+                placement.mRotation = osg::Vec4f(static_cast<float>(refRotation.x()),
+                    static_cast<float>(refRotation.y()), static_cast<float>(refRotation.z()),
+                    static_cast<float>(refRotation.w()));
+                placement.mScale = ref.mScale;
+                const int obx = std::clamp(static_cast<int>(std::floor(ref.mPosition.x() / cellSizeUnits))
+                        - startCell.x(),
+                    0, sSupercellSize - 1);
+                const int oby = std::clamp(static_cast<int>(std::floor(ref.mPosition.y() / cellSizeUnits))
+                        - startCell.y(),
+                    0, sSupercellSize - 1);
+                oncePlacements[cls][oby * sSupercellSize + obx].push_back(placement);
+                ++instances;
+                continue;
+            }
+
             osg::Matrixf matrix;
             matrix.preMultTranslate(ref.mPosition - worldCenter);
-            matrix.preMultRotate(osg::Quat(ref.mRotation.z(), osg::Vec3f(0, 0, -1))
-                * osg::Quat(ref.mRotation.y(), osg::Vec3f(0, -1, 0))
-                * osg::Quat(ref.mRotation.x(), osg::Vec3f(-1, 0, 0)));
+            matrix.preMultRotate(refRotation);
             matrix.preMultScale(osg::Vec3f(ref.mScale, ref.mScale, ref.mScale));
             osg::ref_ptr<osg::MatrixTransform> trans = new osg::MatrixTransform(matrix);
             trans->setDataVariance(osg::Object::STATIC);
@@ -4000,6 +4766,63 @@ namespace MWRender
                 static_cast<int>(std::floor(ref.mPosition.y() / cellSizeUnits)) - startCell.y(), 0, sSupercellSize - 1);
             blockGroup[cls][by * sSupercellSize + bx]->addChild(trans);
             ++instances;
+        }
+
+        if (storeOnce)
+        {
+            std::error_code onceEc;
+            std::filesystem::create_directories(outDir, onceEc);
+            const std::filesystem::path placementFile = outDir / (std::string(namebuf) + sOnceSuffix);
+            if (instances == 0)
+                std::filesystem::remove(placementFile, onceEc);
+            else
+            {
+                MwdsOut out;
+                out.put(sMwdpMagic);
+                out.put(sMwdpVersion);
+                out.put(worldCenter);
+                out.put(static_cast<std::uint32_t>(onceModels.size()));
+                for (const std::string& name : onceModels)
+                    out.putStr(name);
+                std::uint32_t nBlocks = 0;
+                for (int k = 0; k < 3; ++k)
+                    for (int b = 0; b < sSupercellSize * sSupercellSize; ++b)
+                        if (!oncePlacements[k][b].empty())
+                            ++nBlocks;
+                out.put(nBlocks);
+                for (int k = 0; k < 3; ++k)
+                    for (int b = 0; b < sSupercellSize * sSupercellSize; ++b)
+                    {
+                        const std::vector<OncePlacement>& list = oncePlacements[k][b];
+                        if (list.empty())
+                            continue;
+                        out.put(static_cast<std::uint32_t>(k));
+                        out.put(static_cast<std::int32_t>(startCell.x() + b % sSupercellSize));
+                        out.put(static_cast<std::int32_t>(startCell.y() + b / sSupercellSize));
+                        out.put(static_cast<std::uint32_t>(list.size()));
+                        out.putBytes(list.data(), list.size() * sizeof(OncePlacement));
+                    }
+                if (!mwdsWriteFileAtomic(out, placementFile))
+                {
+                    ++mWriteFailures;
+                    Log(Debug::Error) << "Failed to store supercell " << placementFile
+                                      << " (write error - disk full?)";
+                }
+            }
+            bool onceSideOk;
+            {
+                std::ofstream out(stateFile, std::ios::trunc);
+                out << hash;
+                out.flush();
+                onceSideOk = out.good();
+            }
+            Log(Debug::Verbose) << "Supercell " << startCell.x() << "," << startCell.y() << " (store-once): refs "
+                                << refs.size() << " placements " << instances << " models " << onceModels.size()
+                                << " exceptions " << dbgExceptions
+                                << (dbgFirstError.empty() ? "" : (" first=" + dbgFirstError)) << " sidecar "
+                                << (onceSideOk ? "ok" : "WRITE FAILED");
+            outWritten = true;
+            return hash;
         }
 
         std::vector<std::pair<osg::ref_ptr<osg::Group>, int>> classBlocks[3];
@@ -4079,6 +4902,32 @@ namespace MWRender
 
     unsigned int ObjectPaging::loadDistantStaticsResident(const std::filesystem::path& dir, osg::Group* root)
     {
+        if (mStoreOnce)
+        {
+            // store-once: nothing is loaded up front. Every class is
+            // ring-managed (updateResidentRings builds a supercell's drawables
+            // from its placement file when it comes within draw range), and a
+            // model enters the library when a block first needs it.
+            unsigned int placementFiles = 0;
+            std::error_code onceEc;
+            for (const auto& entry : std::filesystem::directory_iterator(dir, onceEc))
+                if (entry.path().extension() == sOnceSuffix)
+                    ++placementFiles;
+            if (!placementFiles)
+            {
+                Log(Debug::Warning) << "Distant statics (store-once): no placement files in " << dir
+                                    << " (bake needed?)";
+                return 0;
+            }
+            mResidentDir = dir;
+            root->addUpdateCallback(new RingDrainCallback(this));
+            mResidentDistantStatics = true;
+            updateOnceMargin(); // from here on the quadtree confines stock paging to its square
+            Log(Debug::Info) << "Distant statics (store-once): " << placementFiles << " supercells in " << dir
+                             << "; drawables are built within draw range, stock object paging ends at the "
+                                "viewing distance and the layer draws beyond it";
+            return placementFiles;
+        }
         const int ringCells[3] = { Settings::terrain().mDistantStaticsNearRingCells,
             Settings::terrain().mDistantStaticsFarRingCells, Settings::terrain().mDistantStaticsVeryFarRingCells };
         std::vector<std::filesystem::path> files;
@@ -4240,26 +5089,51 @@ namespace MWRender
                     std::snprintf(namebuf, sizeof(namebuf), "dl_%d_%d%s", cell.x(), cell.y(), sClassName[k]);
                     // swap only what is attached: globally-resident classes
                     // always, ring classes only while inside the ring
-                    if (ringCells[k] > 0 && !isRingLoaded(namebuf))
+                    if ((mStoreOnce || ringCells[k] > 0) && !isRingLoaded(namebuf))
                         continue;
-                    const std::filesystem::path file = dir
-                        / (std::string("dl_") + std::to_string(cell.x()) + "_" + std::to_string(cell.y())
-                            + sClassSuffix[k]);
-                    osg::ref_ptr<osg::Node> node;
-                    std::error_code fec;
-                    if (std::filesystem::exists(file, fec))
-                    {
-                        node = readSupercellFlat(file);
-                        if (node)
-                            node->setName(namebuf);
-                    }
-                    queueRingSwap(namebuf, node);
+                    queueRingSwap(namebuf, readResidentClass(dir, cell, k));
                 }
             }
             mResidentRefreshActive = false;
             Log(Debug::Info) << "Distant statics: save-state refresh done, " << rebuilt << " supercells rebuilt in "
                              << std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() << "s";
         });
+    }
+
+    osg::ref_ptr<osg::Node> ObjectPaging::readResidentClass(
+        const std::filesystem::path& dir, const osg::Vec2i& cell, int k)
+    {
+        const std::string base = "dl_" + std::to_string(cell.x()) + "_" + std::to_string(cell.y());
+        const std::filesystem::path file = dir / (base + (mStoreOnce ? sOnceSuffix : sClassSuffix[k]));
+        std::error_code ec;
+        if (!std::filesystem::exists(file, ec))
+            return nullptr;
+        osg::ref_ptr<osg::Node> node = mStoreOnce ? readSupercellOnce(file, k) : readSupercellFlat(file);
+        if (node)
+            node->setName(base + sClassName[k]);
+        return node;
+    }
+
+    int ObjectPaging::residentRing(int k, int viewCells) const
+    {
+        if (!mStoreOnce)
+        {
+            const int ringCells[3] = { Settings::terrain().mDistantStaticsNearRingCells,
+                Settings::terrain().mDistantStaticsFarRingCells,
+                Settings::terrain().mDistantStaticsVeryFarRingCells };
+            return ringCells[k] <= 0 ? 0 : std::max(ringCells[k], viewCells);
+        }
+        // store-once: a class's drawables exist where the class can draw -
+        // inside its end distance, and never past what the far plane leaves
+        // on screen (its corners lie beyond the viewing distance)
+        const float end = k == 0 ? Settings::terrain().mDistantStaticsEndNear.get()
+            : k == 1 ? Settings::terrain().mDistantStaticsEndFar.get()
+                     : Settings::terrain().mDistantStaticsEndVeryFar.get();
+        const int byView = viewCells * 3 / 2;
+        if (end <= 0.f)
+            return byView;
+        const float cellSize = static_cast<float>(getCellSize(mWorldspace));
+        return std::min(static_cast<int>(std::ceil(end / cellSize)) + 1, byView);
     }
 
     void ObjectPaging::queueRingSwap(const std::string& name, osg::ref_ptr<osg::Node> node)
@@ -4295,25 +5169,38 @@ namespace MWRender
     {
         if (!mResidentDistantStatics.load() || mResidentDir.empty())
             return;
+        if (mStoreOnce && ++mOnceReportFrames >= 600)
+        {
+            // called once a frame: the average over the last 600, all cameras
+            // (main view, water reflection and refraction) together
+            const std::uint64_t drawables = sOnceDrawables.exchange(0);
+            const std::uint64_t copies = sOnceCopies.exchange(0);
+            Log(Debug::Verbose) << "Distant statics (store-once): per frame " << drawables / mOnceReportFrames
+                                << " instanced batches, " << copies / mOnceReportFrames << " object copies drawn";
+            mOnceReportFrames = 0;
+        }
         const float cellSize = static_cast<float>(getCellSize(mWorldspace));
         const int superSize = sSupercellSize;
         const int pcx = static_cast<int>(std::floor(eye.x() / cellSize));
         const int pcy = static_cast<int>(std::floor(eye.y() / cellSize));
         const osg::Vec2i playerCell(pcx, pcy);
-        if (playerCell == mRingCenter)
+        // a changed far distance moves the rings without the player moving
+        if (playerCell == mRingCenter && !mRingDirty.exchange(false))
             return;
         mRingCenter = playerCell;
 
-        const int ringCells[3] = { Settings::terrain().mDistantStaticsNearRingCells,
-            Settings::terrain().mDistantStaticsFarRingCells, Settings::terrain().mDistantStaticsVeryFarRingCells };
         char namebuf[64];
         bool queued = false;
         std::lock_guard<std::mutex> lock(mRingMutex);
-        // rings must never be outrun by the live viewing distance
-        const int viewCells = static_cast<int>(std::ceil(Settings::camera().mViewingDistance / cellSize)) + superSize;
+        // rings must never be outrun by where the picture ends: the far
+        // plane, which the renderer reports (setOnceDistances) - the viewing
+        // distance, or past it the distant land distance
+        const float farDistance = mOnceFarDistance.load() > 0.f ? mOnceFarDistance.load()
+                                                                : Settings::camera().mViewingDistance.get();
+        const int viewCells = static_cast<int>(std::ceil(farDistance / cellSize)) + superSize;
         for (int k = 0; k < 3; ++k)
         {
-            const int r = ringCells[k] <= 0 ? 0 : std::max(ringCells[k], viewCells);
+            const int r = residentRing(k, viewCells);
             if (r <= 0)
                 continue; // globally resident, not ring-managed
             // load pass: supercells whose cell interval overlaps the ring
@@ -4335,7 +5222,7 @@ namespace MWRender
         for (auto it = mRingLoaded.begin(); it != mRingLoaded.end();)
         {
             const auto& [cell, k] = it->second;
-            const int r = (ringCells[k] <= 0 ? 0 : std::max(ringCells[k], viewCells)) + superSize;
+            const int r = residentRing(k, viewCells) + superSize;
             if (cell.x() + superSize - 1 < pcx - r || cell.x() > pcx + r || cell.y() + superSize - 1 < pcy - r || cell.y() > pcy + r)
             {
                 mRingSwaps.emplace_back(it->first, nullptr);
@@ -4366,20 +5253,31 @@ namespace MWRender
                     if (mRingLoaded.find(name) == mRingLoaded.end())
                         continue; // unloaded while queued
                     lock.unlock();
-                    const std::filesystem::path file = mResidentDir
-                        / ("dl_" + std::to_string(cell.x()) + "_" + std::to_string(cell.y()) + sClassSuffix[k]);
-                    osg::ref_ptr<osg::Node> node;
-                    std::error_code fec;
-                    if (std::filesystem::exists(file, fec))
-                    {
-                        node = readSupercellFlat(file);
-                        if (node)
-                            node->setName(name);
-                    }
+                    osg::ref_ptr<osg::Node> node = readResidentClass(mResidentDir, cell, k);
                     lock.lock();
                     // re-check: may have left the ring during the read
                     if (node && mRingLoaded.find(name) != mRingLoaded.end())
                         mRingSwaps.emplace_back(name, node);
+                    if (mStoreOnce && mRingLoadQueue.empty())
+                    {
+                        std::size_t models = 0;
+                        {
+                            std::lock_guard<std::mutex> libraryLock(mOnceLibraryMutex);
+                            for (const auto& entry : mOnceLibrary)
+                                if (entry.second.valid())
+                                    ++models;
+                        }
+                        Log(Debug::Info) << "Distant statics (store-once): " << mRingLoaded.size()
+                                         << " class nodes within draw range, " << models << " models in the library";
+                        // the reduced textures, counted as they were loaded (a
+                        // texture that left and came back counts twice)
+                        if (const unsigned int loaded = sOnceTexLoaded.load())
+                            Log(Debug::Info) << "Distant statics (store-once): " << loaded
+                                             << " textures loaded so far at 'texture skip' "
+                                             << Settings::terrain().mDistantStaticsTextureSkip.get() << ": "
+                                             << sOnceTexKeptBytes.load() / (1024 * 1024) << " MB kept of "
+                                             << sOnceTexFullBytes.load() / (1024 * 1024) << " MB at full size";
+                    }
                 }
             });
         }

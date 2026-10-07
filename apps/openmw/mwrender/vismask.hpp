@@ -56,11 +56,19 @@ namespace MWRender
         Mask_Lighting = (1 << 19),
 
         Mask_Groundcover = (1 << 20),
+
+        // The store-once distant statics layer. Its drawables are instanced
+        // (placed in the vertex shader by objects.vert), so only cameras that
+        // draw with the scene's own object shaders may see it: the main view,
+        // water reflection and refraction. Shadow casting, the local map and
+        // the precipitation occlusion pass draw with other programs and would
+        // put every copy at the supercell's centre.
+        Mask_DistantStatics = (1 << 21),
     };
 
     // Defines masks to remove when using ToggleWorld command
     constexpr inline unsigned int sToggleWorldMask
-        = Mask_Actor | Mask_Terrain | Mask_Object | Mask_Static | Mask_Groundcover;
+        = Mask_Actor | Mask_Terrain | Mask_Object | Mask_Static | Mask_Groundcover | Mask_DistantStatics;
 
 }
 

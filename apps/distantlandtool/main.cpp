@@ -42,8 +42,11 @@
 
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <set>
+#include <system_error>
 #include <vector>
 
 namespace
@@ -60,6 +63,9 @@ namespace
         auto addOption = result.add_options();
         addOption("help", "print help message");
         addOption("distant-statics", "generate mge-exact single-layer distant statics instead of chunk cache");
+        addOption("cell-range", bpo::value<std::string>()->default_value(""),
+            "with --distant-statics: only the supercells touching cells minX,minY,maxX,maxY (a test bake), "
+            "written as --cell-range=-4,-12,3,-5");
         addOption("data",
             bpo::value<Files::MaybeQuotedPathContainer>()
                 ->default_value(Files::MaybeQuotedPathContainer(), "data")
@@ -245,6 +251,14 @@ namespace
             dataDirs.push_back(std::move(local));
         config.filterOutNonExistingPaths(dataDirs);
 
+        // What a bake is made from, for the record the distant statics bake
+        // keeps of it (below): the data folders in their order, then the
+        // archives and the content files. The engine's own resources/vfs is
+        // left out - it moves with the install and holds no model a bake uses.
+        std::string bakeSource = "distant land bake source 1\n";
+        for (const std::filesystem::path& dir : dataDirs)
+            bakeSource += "data " + Files::pathToUnicodeString(dir) + "\n";
+
         const auto& resDir = variables["resources"].as<Files::MaybeQuotedPath>();
         dataDirs.insert(dataDirs.begin(), resDir / "vfs");
         const Files::Collections fileCollections(dataDirs);
@@ -252,6 +266,10 @@ namespace
         StringsVector contentFiles{ "builtin.omwscripts" };
         const auto& configContent = variables["content"].as<StringsVector>();
         contentFiles.insert(contentFiles.end(), configContent.begin(), configContent.end());
+        for (const std::string& archive : archives)
+            bakeSource += "archive " + archive + "\n";
+        for (const std::string& file : contentFiles)
+            bakeSource += "content " + file + "\n";
 
         Fallback::Map::init(variables["fallback"].as<Fallback::FallbackMap>().mMap);
 
@@ -372,9 +390,58 @@ namespace
 
         if (variables.count("distant-statics"))
         {
-            const std::filesystem::path outDir
-                = std::filesystem::path(Settings::terrain().mObjectPagingDiskCacheDir.get()) / "distant-statics";
+            const std::filesystem::path outDir = MWRender::ObjectPaging::distantStaticsDir(
+                std::filesystem::path(Settings::terrain().mObjectPagingDiskCacheDir.get()));
+            {
+                const std::filesystem::path sourceFile = outDir / "bake-source.txt";
+                std::string recorded;
+                if (std::ifstream in{ sourceFile, std::ios::binary }; in)
+                    recorded.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+                if (recorded != bakeSource)
+                {
+                    std::error_code ec;
+                    if (std::filesystem::exists(outDir, ec) && !std::filesystem::is_empty(outDir, ec))
+                    {
+                        Log(Debug::Info) << "Distant land generation: "
+                                         << (recorded.empty()
+                                                    ? "this bake has no record of the data folders and plugins it was made from"
+                                                    : "the data folders, archives or plugins are not the ones this bake was made from")
+                                         << " - clearing it and building it whole: " << outDir;
+                        std::filesystem::remove_all(outDir, ec);
+                        if (ec)
+                        {
+                            Log(Debug::Error) << "Distant statics generation FAILED: the bake could not be cleared ("
+                                              << ec.message() << "): " << outDir;
+                            return 1;
+                        }
+                    }
+                    std::filesystem::create_directories(outDir, ec);
+                    std::ofstream out{ sourceFile, std::ios::binary };
+                    out << bakeSource;
+                    out.flush();
+                    if (!out)
+                    {
+                        Log(Debug::Error) << "Distant statics generation FAILED: cannot write " << sourceFile;
+                        return 1;
+                    }
+                }
+            }
             const int superSize = MWRender::ObjectPaging::sSupercellSize;
+            const std::string rangeText = variables["cell-range"].as<std::string>();
+            int range[4] = { 0, 0, 0, 0 };
+            if (!rangeText.empty()
+                && std::sscanf(rangeText.c_str(), "%d,%d,%d,%d", &range[0], &range[1], &range[2], &range[3]) != 4)
+            {
+                Log(Debug::Error) << "--cell-range takes four numbers: minX,minY,maxX,maxY";
+                return 1;
+            }
+            if (!rangeText.empty())
+            {
+                minX = std::max(minX, static_cast<float>(range[0]));
+                minY = std::max(minY, static_cast<float>(range[1]));
+                maxX = std::min(maxX, static_cast<float>(range[2]));
+                maxY = std::min(maxY, static_cast<float>(range[3]));
+            }
             const int sx0 = static_cast<int>(std::floor(static_cast<float>(minX) / superSize)) * superSize;
             const int sy0 = static_cast<int>(std::floor(static_cast<float>(minY) / superSize)) * superSize;
             std::vector<osg::Vec2i> cells;

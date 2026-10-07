@@ -78,19 +78,33 @@ namespace Terrain
             unsigned int getMaxLodLevel() const { return mMaxLodLevel; }
             void setMaxLodLevel(unsigned int level) { mMaxLodLevel = level; }
 
+            /// A manager can be confined to the active grid grown by this many
+            /// cells on every side (-1 = everywhere, the default). The quadtree
+            /// asks a confined manager for chunks only inside that square, and
+            /// renders no node that crosses its border (DefaultLodCallback), so
+            /// whatever draws the cells outside it can use the same square and
+            /// meet the manager's chunks exactly on cell borders. Read on the
+            /// cull and preload threads; after a change call rebuildViews().
+            void setGridMargin(int cells) { mGridMargin.store(cells); }
+            int getGridMargin() const { return mGridMargin.load(); }
+
         protected:
             ESM::RefId mWorldspace = ESM::RefId();
 
         private:
             float mViewDistance = 0.f;
             unsigned int mMaxLodLevel = ~0u;
+            std::atomic<int> mGridMargin{ -1 };
         };
         void addChunkManager(ChunkManager*);
 
     private:
         void ensureQuadTreeBuilt();
-        void loadRenderingNode(
-            ViewDataEntry& entry, ViewData* vd, float cellWorldSize, const osg::Vec4i& gridbounds, bool compile);
+        /// the margin of the confined chunk manager (see ChunkManager::setGridMargin), -1 = none
+        int getBorderMargin() const;
+        /// borderMargin: the margin the view's traversal ran with (getBorderMargin at that moment)
+        void loadRenderingNode(ViewDataEntry& entry, ViewData* vd, float cellWorldSize, const osg::Vec4i& gridbounds,
+            int borderMargin, bool compile);
 
         osg::ref_ptr<RootNode> mRootNode;
 

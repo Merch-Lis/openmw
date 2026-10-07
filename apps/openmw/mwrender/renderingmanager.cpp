@@ -323,31 +323,51 @@ namespace MWRender
         // interiors. While active, paged distant chunks are suppressed.
         if (mObjectPaging)
         {
-            const std::filesystem::path dsDir
-                = std::filesystem::path(Settings::terrain().mObjectPagingDiskCacheDir.get()) / "distant-statics";
+            const std::filesystem::path dsDir = ObjectPaging::distantStaticsDir(
+                std::filesystem::path(Settings::terrain().mObjectPagingDiskCacheDir.get()));
             std::error_code dsEc;
             if (std::filesystem::is_directory(dsDir, dsEc))
             {
                 mDistantStaticsRoot = new osg::Group;
                 mDistantStaticsRoot->setName("Distant Statics (resident)");
-                mDistantStaticsRoot->setNodeMask(Mask_Static);
-                // the resident layer overlaps stock rendering out to the
-                // viewing distance; identical surfaces at identical depths
-                // z-fight, and the copies shade differently (no per-light
-                // state on the backdrop), which flickers around light
-                // sources. Bias the whole layer back so it always loses
-                // depth ties.
-                mDistantStaticsRoot->getOrCreateStateSet()->setAttributeAndModes(
-                    new osg::PolygonOffset(1.f, 4.f), osg::StateAttribute::ON);
+                if (mObjectPaging->isStoreOnce())
+                {
+                    // store-once: instanced drawables, drawn outside the loaded
+                    // grid only (no overlap with stock rendering, no bias), on
+                    // their own mask so that only cameras using the scene's
+                    // object shaders see them
+                    mDistantStaticsMask = Mask_DistantStatics;
+                    ObjectPaging::configureOnceRoot(mDistantStaticsRoot->getOrCreateStateSet());
+                }
+                else
+                {
+                    mDistantStaticsMask = Mask_Static;
+                    // the resident layer overlaps stock rendering out to the
+                    // viewing distance; identical surfaces at identical depths
+                    // z-fight, and the copies shade differently (no per-light
+                    // state on the backdrop), which flickers around light
+                    // sources. Bias the whole layer back so it always loses
+                    // depth ties.
+                    mDistantStaticsRoot->getOrCreateStateSet()->setAttributeAndModes(
+                        new osg::PolygonOffset(1.f, 4.f), osg::StateAttribute::ON);
+                }
+                mDistantStaticsRoot->setNodeMask(mDistantStaticsMask);
                 if (mObjectPaging->loadDistantStaticsResident(dsDir, mDistantStaticsRoot.get()) > 0)
                 {
                     sceneRoot->addChild(mDistantStaticsRoot);
                     mDistantStaticsDir = dsDir;
+                    if (mObjectPaging->isStoreOnce())
+                        mOncePaging = mObjectPaging;
                 }
                 else
                     mDistantStaticsRoot = nullptr;
             }
         }
+        // store-once: the viewing distance now ends stock objects only, and
+        // everything set up from mViewDistance below ends the picture
+        mStockObjectDistance = mViewDistance;
+        mViewDistance = farLimitFor(mStockObjectDistance);
+        applyDistantLandDistances();
 
         // water goes after terrain for correct waterculling order
         mWater = std::make_unique<Water>(
@@ -758,7 +778,7 @@ namespace MWRender
     {
         mSky->setEnabled(enabled);
         if (mDistantStaticsRoot)
-            mDistantStaticsRoot->setNodeMask(enabled ? Mask_Static : 0);
+            mDistantStaticsRoot->setNodeMask(enabled ? mDistantStaticsMask : 0);
         if (enabled)
             mShadowManager->enableOutdoorMode();
         else
@@ -1512,7 +1532,7 @@ namespace MWRender
             }
             else if (it->first == "Camera" && it->second == "viewing distance")
             {
-                setViewDistance(Settings::camera().mViewingDistance);
+                setViewingDistanceSetting(Settings::camera().mViewingDistance);
             }
             else if (it->first == "General"
                 && (it->second == "texture filter" || it->second == "texture mipmap" || it->second == "anisotropy"))
@@ -1624,9 +1644,50 @@ namespace MWRender
         }
     }
 
+    float RenderingManager::farLimitFor(float viewingDistance) const
+    {
+        if (!mOncePaging)
+            return viewingDistance;
+        return std::max(viewingDistance, Settings::terrain().mDistantLandDistance.get());
+    }
+
+    void RenderingManager::applyDistantLandDistances()
+    {
+        if (!mOncePaging)
+            return;
+        // stock objects out to the viewing distance in whole cells from the
+        // player's cell; never less than the loaded grid (ObjectPaging)
+        const int stockCells
+            = static_cast<int>(std::floor(mStockObjectDistance / static_cast<float>(Constants::CellSizeInUnits) + 0.5f));
+        if (mOncePaging->setOnceDistances(stockCells, mViewDistance))
+            for (auto& entry : mWorldspaceChunks)
+                if (entry.second.mObjectPaging.get() == mOncePaging)
+                    entry.second.mTerrain->rebuildViews(); // the square moved: its border is in every view
+    }
+
+    float RenderingManager::getBaseViewDistance() const
+    {
+        return farLimitFor(Settings::camera().mViewingDistance);
+    }
+
+    void RenderingManager::setViewingDistanceSetting(float setting)
+    {
+        // the setting (the launcher's and the game's View Distance slider):
+        // with the store-once layer it moves the border between stock objects
+        // and the layer, and the picture still ends at the far limit
+        mStockObjectDistance = setting;
+        mViewDistance = farLimitFor(setting);
+        applyDistantLandDistances();
+        updateProjectionMatrix();
+    }
+
     void RenderingManager::setViewDistance(float distance, bool delay)
     {
+        // a script's view distance (Lua camera.setViewDistance): where the
+        // picture ends, as in stock OpenMW. The border between stock objects
+        // and the store-once layer stays where the setting put it.
         mViewDistance = distance;
+        applyDistantLandDistances();
 
         if (delay)
         {
@@ -1808,6 +1869,8 @@ namespace MWRender
     void RenderingManager::setActiveGrid(const osg::Vec4i& grid)
     {
         mTerrain->setActiveGrid(grid);
+        if (mObjectPaging)
+            mObjectPaging->setOnceActiveGrid(grid); // the store-once layer draws outside it
     }
     bool RenderingManager::pagingEnableObject(int type, const MWWorld::ConstPtr& ptr, bool enabled)
     {

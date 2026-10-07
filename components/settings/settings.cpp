@@ -146,7 +146,12 @@ namespace Settings
 
         if (!loadEditorSettings)
         {
-            defaultSettingsFile = "defaults.bin";
+            // This engine's defaults are in a file of their own name. The
+            // install's defaults.bin stays the stock one: every program checks
+            // that it declares each key of the defaults file it reads (below),
+            // so OpenMW's own launcher and tools would stop on a file that
+            // lists this engine's additional keys.
+            defaultSettingsFile = "OGXdefaults.bin";
             userSettingsFile = "settings.cfg";
         }
         else
@@ -210,7 +215,7 @@ namespace Settings
             return it->second;
 
         throw std::runtime_error("Trying to retrieve a non-existing setting: [" + std::string(category) + "] "
-            + std::string(setting) + ".\nMake sure the defaults.bin file was properly installed.");
+            + std::string(setting) + ".\nMake sure the OGXdefaults.bin file was properly installed.");
     }
 
     std::vector<std::string> Manager::getStringArray(std::string_view setting, std::string_view category)

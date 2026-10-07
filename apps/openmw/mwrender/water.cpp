@@ -367,7 +367,7 @@ namespace MWRender
 
         static constexpr unsigned int sDefaultCullMask = Mask_Effect | Mask_Scene | Mask_Object | Mask_Static
             | Mask_Terrain | Mask_Actor | Mask_ParticleSystem | Mask_Sky | Mask_Sun | Mask_Player | Mask_Lighting
-            | Mask_Groundcover;
+            | Mask_Groundcover | Mask_DistantStatics;
     };
 
     class Reflection : public SceneUtil::RTTNode
@@ -451,7 +451,7 @@ namespace MWRender
             if (reflectionDetail >= 1)
                 extraMask |= Mask_Terrain;
             if (reflectionDetail >= 2)
-                extraMask |= Mask_Static;
+                extraMask |= Mask_Static | Mask_DistantStatics;
             if (reflectionDetail >= 3)
                 extraMask |= Mask_Effect | Mask_ParticleSystem | Mask_Object;
             if (reflectionDetail >= 4)

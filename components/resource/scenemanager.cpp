@@ -465,6 +465,15 @@ namespace Resource
         node->accept(*shaderVisitor);
     }
 
+    void SceneManager::createShadersDiffuseOnly(osg::ref_ptr<osg::Node> node)
+    {
+        osg::ref_ptr<Shader::ShaderVisitor> shaderVisitor(createShaderVisitor());
+        shaderVisitor->setAutoUseNormalMaps(false);
+        shaderVisitor->setAutoUseSpecularMaps(false);
+        shaderVisitor->setAllowedToModifyStateSets(true);
+        node->accept(*shaderVisitor);
+    }
+
     void SceneManager::reinstateRemovedState(osg::ref_ptr<osg::Node> node)
     {
         osg::ref_ptr<Shader::ReinstateRemovedStateVisitor> reinstateRemovedStateVisitor

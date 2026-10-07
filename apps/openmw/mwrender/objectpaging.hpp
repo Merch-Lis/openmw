@@ -1,6 +1,7 @@
 #ifndef OPENMW_MWRENDER_OBJECTPAGING_H
 #define OPENMW_MWRENDER_OBJECTPAGING_H
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <climits>
@@ -11,11 +12,14 @@
 #include <deque>
 #include <filesystem>
 #include <map>
+#include <set>
+#include <string>
 #include <thread>
 
 #include <components/terrain/quadtreeworld.hpp>
 
 #include <osg/LOD>
+#include <osg/observer_ptr>
 #include <osg/ref_ptr>
 
 #include <mutex>
@@ -112,8 +116,50 @@ namespace MWRender
         // the number of mesh files scheduled.
         /// MWDS flat supercell format: memcpy-speed reads, no osgDB
         bool writeSupercellFlat(const osg::Vec3f& worldCenter,
-            const std::vector<std::pair<osg::ref_ptr<osg::Group>, int>>& blocks, const std::filesystem::path& file);
+            const std::vector<std::pair<osg::ref_ptr<osg::Group>, int>>& blocks, const std::filesystem::path& file,
+            bool diffuseOnly = false);
         osg::ref_ptr<osg::Node> readSupercellFlat(const std::filesystem::path& file);
+
+        /// Store-once layout ([Terrain] distant statics store once): each
+        /// distinct model is written once to <dir>/meshes and every reference
+        /// is a placement in its supercell's .mwdp file. The directory both
+        /// the generator and the game use for it:
+        static std::filesystem::path distantStaticsDir(const std::filesystem::path& cacheDir);
+        bool writeOnceMesh(
+            const std::string& model, const osg::Node* templateNode, const std::filesystem::path& dir);
+        /// One (supercell, class) node of the store-once layer, built from the
+        /// supercell's placement file: per cell a group of instanced drawables,
+        /// one per part of each distinct model. Models come from the library
+        /// on first use and leave it when no node holds them.
+        osg::ref_ptr<osg::Node> readSupercellOnce(const std::filesystem::path& file, int cls);
+        osg::ref_ptr<osg::Referenced> getOnceMesh(const std::string& model);
+        /// The store-once layer and stock rendering share the world along one
+        /// square of cells around the player: inside it the scene (the loaded
+        /// grid) and stock object paging draw, outside it the layer does. The
+        /// square is the loaded grid grown until it reaches 'stock cells' from
+        /// the player's cell - the viewing distance in cells. The scene reports
+        /// the grid here (min x, min y, max x, max y; max exclusive).
+        void setOnceActiveGrid(const osg::Vec4i& grid);
+        /// stockCells: how far from the player's cell stock objects are drawn;
+        /// farDistance: where the picture ends (the far plane), which is what
+        /// the layer's rings follow. Returns true when the square changed -
+        /// the terrain views must then be rebuilt.
+        bool setOnceDistances(int stockCells, float farDistance);
+        bool isOnceCellLoaded(int x, int y) const
+        {
+            return x >= mOnceGrid[0].load() && y >= mOnceGrid[1].load() && x < mOnceGrid[2].load()
+                && y < mOnceGrid[3].load();
+        }
+        /// inside the square stock rendering owns (see above)
+        bool isOnceCellStock(int x, int y) const
+        {
+            const int m = std::max(0, getGridMargin());
+            return x >= mOnceGrid[0].load() - m && y >= mOnceGrid[1].load() - m && x < mOnceGrid[2].load() + m
+                && y < mOnceGrid[3].load() + m;
+        }
+        bool isStoreOnce() const { return mStoreOnce; }
+        /// The define and the per-instance attribute divisors the layer's root carries.
+        static void configureOnceRoot(osg::StateSet* stateset);
         unsigned int loadDistantStaticsResident(const std::filesystem::path& dir, osg::Group* root);
         /// Tier-2 reactivity: recompute every supercell's state hash against the
         /// given save state, regenerate stale ones in the background and hot-swap
@@ -133,6 +179,10 @@ namespace MWRender
         void drainRingSwaps(osg::Group* root);
         void queueRingSwap(const std::string& name, osg::ref_ptr<osg::Node> node);
         bool isRingLoaded(const std::string& name);
+        /// one (supercell, class) node in the layout the session runs, named for the swap callbacks
+        osg::ref_ptr<osg::Node> readResidentClass(const std::filesystem::path& dir, const osg::Vec2i& cell, int k);
+        /// cells around the player within which class k is kept attached; 0 = whole world
+        int residentRing(int k, int viewCells) const;
         std::thread mRingThread;
         std::mutex mRingMutex;
         std::condition_variable mRingCv;
@@ -142,6 +192,19 @@ namespace MWRender
         osg::Vec2i mRingCenter{ INT_MAX, INT_MAX };
         std::filesystem::path mResidentDir;
         std::atomic<bool> mResidentRefreshActive{ false };
+        std::mutex mOnceMeshMutex;
+        std::set<std::string> mOnceMeshesWritten;
+        bool mStoreOnce = false;
+        unsigned int mOnceReportFrames = 0;
+        std::mutex mOnceLibraryMutex;
+        std::map<std::string, osg::observer_ptr<osg::Referenced>> mOnceLibrary;
+        // the empty grid: no cell is loaded, and growing it by a margin cannot overflow
+        std::atomic<int> mOnceGrid[4] = { INT_MAX / 2, INT_MAX / 2, INT_MIN / 2, INT_MIN / 2 };
+        std::atomic<int> mOnceStockCells{ 0 };
+        std::atomic<float> mOnceFarDistance{ 0.f };
+        std::atomic<bool> mRingDirty{ false };
+        /// the margin the quadtree confines this manager to (ChunkManager::setGridMargin)
+        void updateOnceMargin();
 
         // All non-activeGrid chunk production (disk read or live build) is
         // asynchronous: requesters get an instant placeholder Group whose

@@ -1,4 +1,5 @@
 #version 120
+#pragma import_defines(MGE_DL_INSTANCED)
 
 #if @useUBO
     #extension GL_ARB_uniform_buffer_object : require
@@ -87,24 +88,50 @@ varying vec3 orthoDepthMapCoord;
 uniform mat4 depthSpaceMatrix;
 #endif
 
-void main(void)
+// Store-once distant statics (objectpaging.cpp, OnceGeometry): one mesh drawn
+// many times, each copy placed here from two per-instance attributes -
+// position with the uniform scale in w, and the rotation as a quaternion.
+// Only that layer's root sets MGE_DL_INSTANCED; every other drawable, and the
+// stock engine, compile the plain path.
+#if defined(MGE_DL_INSTANCED)
+attribute vec4 aMgeInstPos;
+attribute vec4 aMgeInstRot;
+
+vec3 mgeInstRotate(vec3 v)
 {
-#if @particleOcclusion
-    mat4 model = osg_ViewMatrixInverse * gl_ModelViewMatrix;
-    orthoDepthMapCoord = ((depthSpaceMatrix * model) * vec4(gl_Vertex.xyz, 1.0)).xyz;
+    return v + 2.0 * cross(aMgeInstRot.xyz, cross(aMgeInstRot.xyz, v) + aMgeInstRot.w * v);
+}
 #endif
 
-    gl_Position = modelToClip(gl_Vertex);
+void main(void)
+{
+#if defined(MGE_DL_INSTANCED)
+    vec4 mgeVertex = vec4(mgeInstRotate(gl_Vertex.xyz * aMgeInstPos.w) + aMgeInstPos.xyz, 1.0);
+    vec3 mgeNormal = mgeInstRotate(gl_Normal.xyz);
+#else
+    vec4 mgeVertex = gl_Vertex;
+    vec3 mgeNormal = gl_Normal.xyz;
+#endif
 
-    vec4 viewPos = modelToView(gl_Vertex);
+#if @particleOcclusion
+    mat4 model = osg_ViewMatrixInverse * gl_ModelViewMatrix;
+    orthoDepthMapCoord = ((depthSpaceMatrix * model) * vec4(mgeVertex.xyz, 1.0)).xyz;
+#endif
+
+    gl_Position = modelToClip(mgeVertex);
+
+    vec4 viewPos = modelToView(mgeVertex);
     gl_ClipVertex = viewPos;
     passColor = gl_Color;
     passViewPos = viewPos.xyz;
-    passNormal = gl_Normal.xyz;
+    passNormal = mgeNormal;
     normalToViewMatrix = gl_NormalMatrix;
 
 #if @normalMap || @diffuseParallax
     passTangent = gl_MultiTexCoord7.xyzw;
+#if defined(MGE_DL_INSTANCED)
+    passTangent.xyz = mgeInstRotate(passTangent.xyz);
+#endif
     normalToViewMatrix *= generateTangentSpace(passTangent, passNormal);
 #endif
 

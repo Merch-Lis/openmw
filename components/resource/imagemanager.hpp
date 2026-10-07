@@ -29,11 +29,21 @@ namespace Resource
         /// Returns the dummy image if the given image is not found.
         osg::ref_ptr<osg::Image> getImage(VFS::Path::NormalizedView path, bool disableFlip = false);
 
+        /// The same image, but one that is not in the cache yet is loaded
+        /// without entering it: the caller is then its only owner, and the
+        /// pixels go when the caller lets go instead of staying for the cache's
+        /// expiry delay. For a caller that keeps a reduced copy only (the
+        /// distant layer's textures). An image the cache already holds is
+        /// returned as it is and must not be modified.
+        osg::ref_ptr<osg::Image> getImageUncached(VFS::Path::NormalizedView path, bool disableFlip = false);
+
         osg::Image* getWarningImage();
 
         void reportStats(unsigned int frameNumber, osg::Stats* stats) const override;
 
     private:
+        osg::ref_ptr<osg::Image> loadImage(VFS::Path::NormalizedView path, bool disableFlip, bool cache);
+
         osg::ref_ptr<osg::Image> mWarningImage;
         osg::ref_ptr<osgDB::Options> mOptions;
 
